@@ -1,0 +1,18 @@
+{
+  "name": "class-leave-register",
+  "version": "1.0.0",
+  "private": true,
+  "description": "班级请假登记 —— 本机运行的 macOS 应用（HTML + CSS + JavaScript，零第三方依赖）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/selftest.js",
+    "test:e2e": "node test/e2e.js",
+    "test:export": "node test/export-default-dir.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

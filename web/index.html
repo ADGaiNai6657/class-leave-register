@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>班级请假登记</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>班级请假登记</h1>
+        <p class="roster-info" id="rosterInfo">正在读取花名册……</p>
+      </div>
+      <div class="controls">
+        <div class="size-control">
+          <span class="control-label" id="sizeLabel">卡片大小</span>
+          <div class="segmented" id="sizeGroup" role="group" aria-labelledby="sizeLabel">
+            <button type="button" data-size="small">小</button>
+            <button type="button" data-size="medium" class="active">中</button>
+            <button type="button" data-size="large">大</button>
+          </div>
+        </div>
+        <button type="button" class="btn primary" id="exportBtn">导出</button>
+      </div>
+    </header>
+
+    <div class="banner-area" id="bannerArea"></div>
+
+    <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
+
+    <footer class="statusbar">
+      <span>双击卡片填写请假信息，再次双击可收起</span>
+      <span id="statLine">已填写 0 / 0</span>
+    </footer>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-head">
+          <h2 id="modalTitle">导出登记结果</h2>
+          <button type="button" class="icon-btn" id="modalClose" aria-label="关闭">✕</button>
+        </div>
+        <p class="modal-summary" id="modalSummary"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn option" id="copyBtn">
+            <span class="option-title">复制到剪切板</span>
+            <span class="option-desc">Tab 分隔，可直接粘贴到聊天窗口或表格软件</span>
+          </button>
+          <button type="button" class="btn option primary" id="copyCsvBtn">
+            <span class="option-title">复制到剪切板，并输出 CSV</span>
+            <span class="option-desc">CSV 保存到项目根目录，UTF-8 编码（含 BOM），中文不乱码</span>
+          </button>
+        </div>
+        <div class="modal-status" id="modalStatus" role="status" aria-live="polite"></div>
+        <div class="modal-foot">
+          <button type="button" class="btn ghost" id="revealBtn" hidden>在访达中显示</button>
+          <button type="button" class="btn ghost" id="modalCloseBottom">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
