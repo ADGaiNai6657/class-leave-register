@@ -2,7 +2,7 @@
   "name": "class-leave-register",
   "version": "1.0.0",
   "private": true,
-  "description": "班级请假登记 —— 本机运行的 macOS 应用（HTML + CSS + JavaScript，零第三方依赖）",
+  "description": "班级请假登记 —— 本机运行的班级请假登记工具（HTML + CSS + JavaScript，零第三方依赖，支持 macOS / Windows）",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

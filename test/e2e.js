@@ -4,22 +4,48 @@
  * 端到端测试：真实启动本地服务 + 真实浏览器（Chrome headless，通过 DevTools 协议驱动）
  *
  * 覆盖：卡片渲染、卡片大小、双击展开、填写/修改、补假单选、编辑状态、
- *       剪切板写入（用 pbpaste 回读校验）、CSV 落盘与转义、重复导出、弹窗行为、
+ *       剪切板写入（跨平台回读校验）、CSV 落盘与转义、重复导出、弹窗行为、
  *       无外部网络请求、无本地持久化。
  *
  * 运行：npm run test:e2e
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
+
+const { readClipboard } = require('../lib/clipboard');
 
 const APP_DIR = path.resolve(__dirname, '..');
 const E2E_DIR = path.join(__dirname, '.e2e');
 const EXPORT_DIR = path.join(E2E_DIR, 'desktop');
 const PROFILE_DIR = path.join(E2E_DIR, 'chrome-profile');
 const SHOT_DIR = path.join(__dirname, 'screenshots');
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+
+/**
+ * 跨平台查找本机 Chrome（可用环境变量 CHROME_PATH 覆盖）。
+ * 找不到时返回 null，测试会跳过而不是报错。
+ */
+function findChrome() {
+  const override = process.env.CHROME_PATH;
+  if (override && fs.existsSync(override)) return override;
+
+  const candidates = [];
+  if (process.platform === 'darwin') {
+    candidates.push('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    candidates.push(path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'));
+  } else if (process.platform === 'win32') {
+    for (const root of [process.env['ProgramFiles'], process.env['ProgramFiles(x86)'], process.env['LOCALAPPDATA']]) {
+      if (root) candidates.push(path.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    }
+  } else {
+    candidates.push('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser');
+  }
+  return candidates.find((p) => p && fs.existsSync(p)) || null;
+}
+
+const CHROME = findChrome();
 const DEBUG_PORT = 9333;
 
 const results = [];
@@ -115,8 +141,8 @@ async function fetchJson(url) {
 // ---------------------------------------------------------------- 主流程
 
 async function main() {
-  if (!fs.existsSync(CHROME)) {
-    process.stdout.write(`未找到 Chrome，跳过端到端测试：${CHROME}\n`);
+  if (!CHROME) {
+    process.stdout.write('未找到 Chrome，跳过端到端测试（可用环境变量 CHROME_PATH 指定路径）。\n');
     return;
   }
 
@@ -432,7 +458,7 @@ async function main() {
       }
     );
     equal(
-      '导出前“在访达中显示”按钮不可见（hidden 生效）',
+      '导出前“在文件夹中显示”按钮不可见（hidden 生效）',
       await cdp.eval(`
         const btn = document.getElementById('revealBtn');
         const rect = btn.getBoundingClientRect();
@@ -474,7 +500,7 @@ async function main() {
     const copyStatus = await cdp.eval(`return document.getElementById('modalStatus').textContent;`);
     check('复制成功提示为 2 行（只有请假的学生）', copyStatus.includes('已复制 2 行'), copyStatus);
 
-    const clipboard = execFileSync('/usr/bin/pbpaste', [], { encoding: 'utf8' });
+    const clipboard = await readClipboard();
     const clipLines = clipboard.split('\n');
     equal('剪切板第一行是导出标题', clipLines[0], state.exportTitle);
     equal('剪切板第二行为表头（Tab 分隔）', clipLines[1], '姓名\t请假理由\t是否补假');
@@ -499,7 +525,7 @@ async function main() {
     await waitForCsvCount(1, '第 1 个 CSV 文件写出');
     const csvStatus = await cdp.eval(`return document.getElementById('modalStatus').textContent;`);
     check('CSV 导出成功后提示保存路径', csvStatus.includes('CSV') && csvStatus.includes(EXPORT_DIR), csvStatus);
-    check('CSV 导出后出现“在访达中显示”按钮', await cdp.eval(`
+    check('CSV 导出后出现“在文件夹中显示”按钮', await cdp.eval(`
       const btn = document.getElementById('revealBtn');
       return !btn.hidden && btn.getBoundingClientRect().height > 0;
     `));

@@ -555,7 +555,7 @@ test('导出目录不存在时报错而不是静默失败', () => {
   assert.throws(() => writeCsv([{ name: '张三', reason: '', makeup: null }], { dir }), /导出目录不存在/);
 });
 
-test('默认导出目录是项目根目录（不是桌面），且访达只允许打开导出目录内的文件', () => {
+test('默认导出目录是项目根目录（不是桌面），且文件管理器只允许打开导出目录内的文件', () => {
   assert.equal(defaultExportDir(), APP_DIR);
   assert.notEqual(defaultExportDir(), path.join(os.homedir(), 'Desktop'));
   const inside = path.join(defaultExportDir(), '请假登记-1.csv');

@@ -442,7 +442,7 @@
     try {
       await api('/api/reveal', { method: 'POST', body: { path: state.lastCsvPath } });
     } catch (err) {
-      setStatus(`无法在访达中显示：${err.message}`, 'error');
+      setStatus(`无法在文件夹中显示：${err.message}`, 'error');
     }
   }
 

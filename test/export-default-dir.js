@@ -15,7 +15,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
+
+const { readClipboard } = require('../lib/clipboard');
 
 const APP_DIR = path.resolve(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -98,7 +100,7 @@ async function main() {
     );
     check('逗号与引号被正确转义', lines[3] === `${students[1].name},"参加考试，需要""提前""离校",是`, lines[3]);
 
-    const clip = execFileSync('/usr/bin/pbpaste', [], { encoding: 'utf8' });
+    const clip = await readClipboard();
     const clipLines = clip.split('\n');
     check('剪切板第一行是导出标题', clipLines[0] === state.exportTitle, clipLines[0]);
     check('剪切板第二行是 Tab 分隔表头', clipLines[1] === '姓名\t请假理由\t是否补假', clipLines[1]);

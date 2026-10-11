@@ -1,0 +1,10 @@
+# 统一换行符，避免在不同系统克隆后脚本无法运行
+#
+# - 默认交给 git 自动处理，但显式声明脚本类型，确保：
+#   * Windows 批处理（.cmd/.bat）检出为 CRLF，否则 cmd.exe 会解析错乱；
+#   * Unix 脚本（.command/.sh）检出为 LF，否则 bash 会报错。
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.command text eol=lf
+*.sh text eol=lf

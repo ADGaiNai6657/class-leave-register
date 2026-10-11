@@ -10,7 +10,6 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
 
 const { resolveRoster, RosterError, defaultSearchDirs } = require('./lib/roster');
 const {
@@ -23,6 +22,7 @@ const {
   DEFAULT_TITLE,
 } = require('./lib/export');
 const { writeClipboard } = require('./lib/clipboard');
+const { openUrl, revealPath } = require('./lib/system');
 
 const APP_DIR = __dirname;
 const WEB_DIR = path.join(APP_DIR, 'web');
@@ -81,7 +81,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      '班级请假登记 —— 本地 macOS 应用',
+      '班级请假登记 —— 本地应用（macOS / Windows）',
       '',
       '用法：node server.js [选项]',
       '',
@@ -290,7 +290,7 @@ function createServer(context) {
         if (!target || !fs.existsSync(target) || !isInsideExportDir(target, dir)) {
           return sendJson(res, 400, { ok: false, error: '只能打开导出目录中的文件' });
         }
-        spawn('/usr/bin/open', ['-R', target], { detached: true, stdio: 'ignore' }).unref();
+        await revealPath(target);
         return sendJson(res, 200, { ok: true });
       }
 
@@ -332,13 +332,13 @@ function log(message) {
 }
 
 /**
- * 用系统默认浏览器打开界面（macOS 自带的 /usr/bin/open）。
+ * 用系统默认浏览器打开界面（跨平台：macOS 用 open，Windows 用 start，其他用 xdg-open）。
  * 不指定、也不依赖任何特定浏览器。
  */
-function openWindow(url) {
+async function openWindow(url) {
   const hint = '若没有自动弹出，请手动在浏览器中打开上面的地址';
   try {
-    spawn('/usr/bin/open', [url], { detached: true, stdio: 'ignore' }).unref();
+    await openUrl(url);
     return `已用系统默认浏览器打开界面；${hint}`;
   } catch (err) {
     return `自动打开界面失败（${err.message}），请手动打开上面的地址`;
@@ -380,7 +380,7 @@ function main() {
     log(`导出文本首行标题：${title}（来源：${titleSource}；只导出已填写请假信息的学生）`);
     if (!state.roster) log(`注意：尚未成功读取花名册，请按界面提示处理。`);
     log('按 Control+C 退出程序（关闭后本次填写的数据不会保留）。');
-    if (options.open) log(openWindow(url));
+    if (options.open) openWindow(url).then((message) => log(message));
   });
 
   const shutdown = () => {
