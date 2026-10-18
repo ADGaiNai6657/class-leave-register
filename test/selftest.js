@@ -21,7 +21,8 @@ const { parseLeaveCsv, matchRecords } = require('../lib/import');
 const {
   csvEscape,
   buildCsv,
-  buildTsv,
+  buildClipboardText,
+  displayWidth,
   writeCsv,
   normalizeRecords,
   defaultExportDir,
@@ -464,19 +465,25 @@ test('导出只保留请假的学生：填了理由 或 选了是否补假', () 
     '只保留填写过的学生；只有空白字符的理由不算填写'
   );
 
-  // 一个人都没填时：剪贴板内容为空，CSV 只有标题和表头
+  // 一个人都没填时：剪贴板内容只有标题和表头，CSV 只有标题和表头
   const none = selectLeaveRecords(normalizeRecords([{ name: '李四', reason: '', makeup: null }]));
   assert.equal(none.length, 0);
-  assert.equal(buildTsv(none), `${DEFAULT_TITLE}\n姓名\t请假理由\t是否补假`);
+  const emptyClipboard = buildClipboardText(none);
+  const emptyLines = emptyClipboard.split('\n');
+  assert.equal(emptyLines.length, 2);
+  assert.equal(emptyLines[0], DEFAULT_TITLE);
+  assert.ok(emptyLines[1].startsWith('姓名'), '姓名列表头居左');
+  assert.ok(emptyLines[1].endsWith('是否补假'), '是否补假表头居右');
+  assert.ok(!emptyClipboard.includes('\t'), '不再使用 Tab');
   assert.equal(buildCsv(none), `\uFEFF${DEFAULT_TITLE}\r\n姓名,请假理由,是否补假\r\n`);
 });
 
 test('标题行可以覆盖（--title / 环境变量之外的直接传参）', () => {
   const records = normalizeRecords([{ name: '张三', reason: '身体不适', makeup: false }]);
-  assert.equal(buildTsv(records, { title: '本某某班' }).split('\n')[0], '本某某班');
+  assert.equal(buildClipboardText(records, { title: '本某某班' }).split('\n')[0], '本某某班');
   assert.equal(buildCsv(records, { title: '本某某班' }).slice(1).split('\r\n')[0], '本某某班');
-  assert.equal(buildTsv(records).split('\n')[0], DEFAULT_TITLE, '默认标题');
-  assert.equal(buildTsv([]).split('\n')[0], DEFAULT_TITLE, '空数据也保留标题');
+  assert.equal(buildClipboardText(records).split('\n')[0], DEFAULT_TITLE, '默认标题');
+  assert.equal(buildClipboardText([]).split('\n')[0], DEFAULT_TITLE, '空数据也保留标题');
 });
 
 test('花名册文件名可推导导出标题（去掉副本 / (1) / 花名册等）', () => {
@@ -520,25 +527,45 @@ test('导出标题优先级：--title > 花名册文件名 > 环境变量 > loca
 test('未选择是否补假时导出为空，而不是编造“否”', () => {
   const records = normalizeRecords([{ name: '李四', reason: '事假', makeup: null }]);
   assert.equal(buildCsv(records).slice(1).split('\r\n')[2], '李四,事假,');
-  assert.equal(buildTsv(records).split('\n')[2], '李四\t事假\t');
+  const row = buildClipboardText(records).split('\n')[2];
+  assert.ok(row.startsWith('李四'), '姓名居左');
+  assert.ok(row.trimEnd().endsWith('事假'), '未选择补假时该列留空，不编造“否”');
 });
 
-test('剪切板文本使用 Tab 分隔，第一行标题，且字段内换行/制表符不会破坏结构', () => {
+test('显示宽度：CJK / 全角记 2 列，ASCII 记 1 列', () => {
+  assert.equal(displayWidth('abc'), 3);
+  assert.equal(displayWidth('张三'), 4);
+  assert.equal(displayWidth('张三abc'), 7);
+  assert.equal(displayWidth('，'), 2);
+  assert.equal(displayWidth(''), 0);
+});
+
+test('剪切板文本按显示宽度对齐：姓名居左、理由居中、补假居右，且字段内换行/制表符不破坏结构', () => {
   const records = normalizeRecords([
     { name: '张三', reason: '身体不适', makeup: false },
     { name: '李四', reason: '', makeup: null },
     { name: '王五', reason: '参加考试\n需要提前离校\t谢谢', makeup: true },
   ]);
-  const tsv = buildTsv(records);
-  const lines = tsv.split('\n');
-  assert.equal(lines[0], DEFAULT_TITLE);
-  assert.equal(lines[1], '姓名\t请假理由\t是否补假');
-  assert.equal(lines[2], '张三\t身体不适\t否');
-  assert.equal(lines[3], '李四\t\t');
-  assert.equal(lines[4], '王五\t参加考试 需要提前离校 谢谢\t是');
-  assert.equal(lines.length, 5, '不应该因为字段内换行而多出记录行');
-  assert.equal(lines[0].split('\t').length, 1, '标题行单独一行');
-  for (const line of lines.slice(1)) assert.equal(line.split('\t').length, 3);
+  const text = buildClipboardText(records);
+  const lines = text.split('\n');
+
+  assert.equal(lines[0], DEFAULT_TITLE, '第一行是标题');
+  assert.ok(!text.includes('\t'), '不再使用 Tab，避免姓名长短不一时错位');
+  assert.ok(lines[1].startsWith('姓名'), '姓名表头居左');
+  assert.ok(lines[1].includes('请假理由'), '请假理由表头居中');
+  assert.ok(lines[1].endsWith('是否补假'), '是否补假表头居右');
+
+  assert.equal(lines.length, 5, '字段内换行/制表符不会多出记录行');
+  assert.ok(lines[2].startsWith('张三'), '姓名居左');
+  assert.ok(lines[2].trimEnd().endsWith('否'), '是否补假居右');
+  assert.ok(lines[3].startsWith('李四'));
+  assert.ok(lines[4].startsWith('王五'));
+  assert.ok(lines[4].includes('参加考试 需要提前离校 谢谢'), '字段内换行/制表符归一为空格');
+  assert.ok(lines[4].trimEnd().endsWith('是'));
+
+  // 表头与数据行的显示宽度一致（CJK 记 2 列）
+  const widths = lines.slice(1).map((line) => displayWidth(line));
+  assert.equal(new Set(widths).size, 1, `各行宽度应一致：${widths.join(',')}`);
 });
 
 test('导出数据校验：非法输入会被拒绝', () => {

@@ -103,8 +103,18 @@ async function main() {
     const clip = await readClipboard();
     const clipLines = clip.split('\n');
     check('剪切板第一行是导出标题', clipLines[0] === state.exportTitle, clipLines[0]);
-    check('剪切板第二行是 Tab 分隔表头', clipLines[1] === '姓名\t请假理由\t是否补假', clipLines[1]);
+    check(
+      '剪切板表头：姓名居左、理由居中、补假居右',
+      clipLines[1].startsWith('姓名') && clipLines[1].includes('请假理由') && clipLines[1].endsWith('是否补假'),
+      clipLines[1]
+    );
     check('剪切板只含 2 名请假学生', clipLines.length === 4, clipLines.length);
+    check('剪切板不再使用 Tab', !clip.includes('\t'));
+    check(
+      '剪切板学生行按新格式对齐',
+      clipLines[2].startsWith(students[0].name) && clipLines[2].trimEnd().endsWith('否'),
+      clipLines[2]
+    );
 
     process.stdout.write(`\n导出文件：${csvPath}\n前 4 行内容：\n${lines.slice(0, 4).join('\n')}\n\n`);
   } finally {

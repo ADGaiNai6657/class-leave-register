@@ -406,6 +406,17 @@ body {
   font-weight: 600;
 }
 
+.field-hint {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.field-label .link-btn {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
 .card textarea {
   width: 100%;
   min-height: 62px;

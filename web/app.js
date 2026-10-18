@@ -198,11 +198,28 @@
     const makeupGroup = document.createElement('div');
     makeupGroup.className = 'radio-row';
     makeupGroup.setAttribute('role', 'radiogroup');
-    makeupGroup.setAttribute('aria-label', `${student.name} 是否补假`);
+    makeupGroup.setAttribute('aria-label', `${student.name} 是否补假（可不选）`);
 
     const makeupTitle = document.createElement('div');
     makeupTitle.className = 'field-label';
-    makeupTitle.textContent = '是否补假？';
+    makeupTitle.append(document.createTextNode('是否补假？'));
+    const optionalHint = document.createElement('span');
+    optionalHint.className = 'field-hint';
+    optionalHint.textContent = '（可不选）';
+    makeupTitle.append(optionalHint);
+
+    const clearMakeup = document.createElement('button');
+    clearMakeup.type = 'button';
+    clearMakeup.className = 'link-btn clear-makeup-btn';
+    clearMakeup.textContent = '清除选择';
+    clearMakeup.hidden = student.makeup === null;
+    clearMakeup.addEventListener('click', () => {
+      state.students[index].makeup = null;
+      for (const radio of makeupGroup.querySelectorAll('input[type="radio"]')) radio.checked = false;
+      clearMakeup.hidden = true;
+      updateCardVisual(index);
+    });
+    makeupTitle.append(clearMakeup);
 
     for (const [value, label] of [
       ['yes', '是'],
@@ -217,6 +234,7 @@
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         state.students[index].makeup = value === 'yes';
+        clearMakeup.hidden = false;
         updateCardVisual(index);
       });
       wrap.append(radio, document.createTextNode(label));
@@ -227,7 +245,7 @@
     actions.className = 'editor-actions';
     const collapse = document.createElement('button');
     collapse.type = 'button';
-    collapse.className = 'link-btn';
+    collapse.className = 'link-btn collapse-btn';
     collapse.textContent = '收起';
     collapse.addEventListener('click', () => setExpanded(card, false));
     actions.append(collapse);
@@ -388,7 +406,7 @@
       summary += '目前还没有人填写请假信息，导出内容将只有标题和表头。';
     }
     if (missingMakeup > 0) {
-      summary += `其中 ${missingMakeup} 名填写了理由但没有选择是否补假，导出时该字段为空。`;
+      summary += `其中 ${missingMakeup} 名只填了理由、未选是否补假（可不选），导出时该字段留空。`;
     }
     els.modalSummary.textContent = summary;
     setStatus('', '');

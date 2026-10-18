@@ -15,7 +15,7 @@ const { resolveRoster, RosterError, defaultSearchDirs } = require('./lib/roster'
 const {
   normalizeRecords,
   selectLeaveRecords,
-  buildTsv,
+  buildClipboardText,
   writeCsv,
   defaultExportDir,
   isInsideExportDir,
@@ -316,8 +316,8 @@ function createServer(context) {
         if (records.length === 0) {
           return sendJson(res, 400, { ok: false, error: '目前没有任何学生填写请假信息，没有可复制的内容。' });
         }
-        const tsv = buildTsv(records, { title: resolveCurrentTitle().title });
-        await writeClipboard(tsv);
+        const clipboardText = buildClipboardText(records, { title: resolveCurrentTitle().title });
+        await writeClipboard(clipboardText);
         return sendJson(res, 200, {
           ok: true,
           rowCount: records.length,
@@ -331,12 +331,12 @@ function createServer(context) {
         const all = normalizeRecords(body.records);
         const records = selectLeaveRecords(all);
         const exportTitle = resolveCurrentTitle().title;
-        const tsv = buildTsv(records, { title: exportTitle });
+        const clipboardText = buildClipboardText(records, { title: exportTitle });
         const csv = writeCsv(records, { dir: exportDir || defaultExportDir(), title: exportTitle });
         let clipboardWarning = null;
         try {
           if (records.length === 0) throw new Error('目前没有任何学生填写请假信息');
-          await writeClipboard(tsv);
+          await writeClipboard(clipboardText);
         } catch (err) {
           clipboardWarning = err.message;
         }

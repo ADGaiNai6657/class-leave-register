@@ -16,7 +16,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const { readClipboard } = require('../lib/clipboard');
-const { buildCsv } = require('../lib/export');
+const { buildCsv, displayWidth } = require('../lib/export');
 
 const APP_DIR = path.resolve(__dirname, '..');
 const E2E_DIR = path.join(__dirname, '.e2e');
@@ -309,7 +309,7 @@ async function main() {
     check('小尺寸展开后单选按钮仍可见', smallExpanded.radiosInline, smallExpanded);
     await cdp.screenshot(path.join(SHOT_DIR, '02b-小尺寸-展开.png'));
     await cdp.eval(`
-      document.querySelector('.card[data-index="0"] .link-btn').click();
+      document.querySelector('.card[data-index="0"] .collapse-btn').click();
       document.querySelector('#sizeGroup button[data-size="medium"]').click();
       return true;
     `);
@@ -339,7 +339,7 @@ async function main() {
           focused: document.activeElement === card.querySelector('textarea'),
           placeholder: card.querySelector('textarea').placeholder,
           radios: card.querySelectorAll('input[type=radio]').length,
-          makeupTitle: [...card.querySelectorAll('.field-label')].map((e) => e.textContent).includes('是否补假？'),
+          makeupTitle: [...card.querySelectorAll('.field-label')].some((e) => e.textContent.includes('是否补假？')),
         };
       `),
       { expanded: true, visible: true, focused: true, placeholder: '请填入请假理由……', radios: 2, makeupTitle: true }
@@ -401,6 +401,32 @@ async function main() {
       { checked: ['no'], preview: '身体不适，需要休息 · 补假：否' }
     );
 
+    // 补假可不选：选中后可以清除，恢复为“未选”
+    check(
+      '选中补假后出现“清除选择”按钮',
+      await cdp.eval(`
+        const card = document.querySelector('.card[data-index="0"]');
+        return !card.querySelector('.clear-makeup-btn').hidden;
+      `)
+    );
+    await cdp.eval(`document.querySelector('.card[data-index="0"] .clear-makeup-btn').click(); return true;`);
+    await sleep(80);
+    equal(
+      '清除后补假恢复为未选（可以不选）',
+      await cdp.eval(`
+        const card = document.querySelector('.card[data-index="0"]');
+        return {
+          checked: [...card.querySelectorAll('input[type=radio]')].filter((r) => r.checked).map((r) => r.value),
+          preview: card.querySelector('.card-preview').textContent,
+          clearHidden: card.querySelector('.clear-makeup-btn').hidden,
+        };
+      `),
+      { checked: [], preview: '身体不适，需要休息 · 补假未选', clearHidden: true }
+    );
+    // 恢复“否”，供后续导出断言使用
+    await cdp.eval(`document.querySelector('.card[data-index="0"] input[value="no"]').click(); return true;`);
+    await sleep(80);
+
     // 第二位学生：包含逗号、引号、换行（考验 CSV 转义与剪切板格式）
     const reason2 = '参加考试，需要"提前"离校\n并复诊';
     await cdp.eval(`
@@ -418,7 +444,7 @@ async function main() {
     // 收起再展开，内容仍然保留（可继续修改）
     await cdp.eval(`
       const card = document.querySelector('.card[data-index="1"]');
-      card.querySelector('.link-btn').click();
+      card.querySelector('.collapse-btn').click();
       return true;
     `);
     await sleep(100);
@@ -504,15 +530,29 @@ async function main() {
     const clipboard = await readClipboard();
     const clipLines = clipboard.split('\n');
     equal('剪切板第一行是导出标题', clipLines[0], state.exportTitle);
-    equal('剪切板第二行为表头（Tab 分隔）', clipLines[1], '姓名\t请假理由\t是否补假');
-    equal('剪切板只含标题 + 表头 + 2 名请假学生', clipLines.length, 4);
-    equal('剪切板学生行内容正确', clipLines[2], `${expectedNames[0]}\t身体不适，需要休息\t否`);
-    equal('剪切板第 4 行（字段内换行已归一，仍是 3 列）', clipLines[3], `${expectedNames[1]}\t参加考试，需要"提前"离校 并复诊\t是`);
     check(
-      '剪切板：标题行单独一行，其余每行 3 列',
-      clipLines[0].split('\t').length === 1 && clipLines.slice(1).every((l) => l.split('\t').length === 3),
-      clipLines.map((l) => l.split('\t').length)
+      '剪切板表头：姓名居左、理由居中、补假居右',
+      clipLines[1].startsWith('姓名') && clipLines[1].includes('请假理由') && clipLines[1].endsWith('是否补假'),
+      clipLines[1]
     );
+    equal('剪切板只含标题 + 表头 + 2 名请假学生', clipLines.length, 4);
+    check(
+      '剪切板学生行内容正确（姓名居左、补假居右）',
+      clipLines[2].startsWith(expectedNames[0]) &&
+        clipLines[2].includes('身体不适，需要休息') &&
+        clipLines[2].trimEnd().endsWith('否'),
+      clipLines[2]
+    );
+    check(
+      '剪切板第 4 行（字段内换行已归一，补假居右）',
+      clipLines[3].startsWith(expectedNames[1]) &&
+        clipLines[3].includes('参加考试，需要"提前"离校 并复诊') &&
+        clipLines[3].trimEnd().endsWith('是'),
+      clipLines[3]
+    );
+    check('剪切板不再使用 Tab（避免姓名长短不一导致错位）', !clipboard.includes('\t'));
+    const clipWidths = clipLines.slice(1).map((line) => displayWidth(line));
+    check('剪切板各列对齐（每行显示宽度一致）', new Set(clipWidths).size === 1, clipWidths);
     check(
       '剪切板不再包含未填写请假信息的学生',
       [expectedNames[2], expectedNames[3], expectedNames[expectedNames.length - 1]].every((n) => !clipboard.includes(n)),
