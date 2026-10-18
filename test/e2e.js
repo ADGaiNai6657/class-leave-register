@@ -16,6 +16,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const { readClipboard } = require('../lib/clipboard');
+const { buildCsv } = require('../lib/export');
 
 const APP_DIR = path.resolve(__dirname, '..');
 const E2E_DIR = path.join(__dirname, '.e2e');
@@ -632,6 +633,62 @@ async function main() {
     equal('无人填写时仍可导出 CSV（新增 1 个文件）', newFiles.length, 1);
     const emptyCsv = fs.readFileSync(path.join(EXPORT_DIR, newFiles[0]), 'utf8');
     equal('空的 CSV 只有标题与表头', emptyCsv, `\uFEFF${state.exportTitle}\r\n姓名,请假理由,是否补假\r\n`);
+
+    // ---------------------------------------------------------- 读取 CSV
+    await cdp.eval(`document.getElementById('modalClose').click(); return true;`);
+    await cdp.eval(`document.getElementById('importBtn').click(); return true;`);
+    await sleep(100);
+    equal(
+      '点击顶栏“读取 CSV”后弹出导入弹窗',
+      await cdp.eval(`return { hidden: document.getElementById('importBackdrop').hidden, dropzone: !!document.getElementById('dropZone') };`),
+      { hidden: false, dropzone: true }
+    );
+
+    const importPath = path.join(E2E_DIR, '导入测试.csv');
+    const importRecords = [
+      { name: expectedNames[0], reason: '导入的理由', makeup: false },
+      { name: expectedNames[1], reason: '导入的第二条', makeup: true },
+    ];
+    fs.writeFileSync(importPath, buildCsv(importRecords), 'utf8');
+
+    await cdp.send('DOM.enable');
+    const { root } = await cdp.send('DOM.getDocument', { depth: -1 });
+    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: '#fileInput' });
+    await cdp.send('DOM.setFileInputFiles', { files: [importPath], nodeId });
+    await cdp.eval(`document.getElementById('fileInput').dispatchEvent(new Event('change')); return true;`);
+
+    await cdp.waitFor(
+      `document.getElementById('importStatus').classList.contains('success') || document.getElementById('importStatus').classList.contains('warn')`,
+      15000,
+      '导入完成'
+    );
+    equal(
+      '读取 CSV 后恢复 2 名学生并更新统计',
+      await cdp.eval(`
+        return {
+          edited: document.querySelectorAll('.card.edited').length,
+          stat: document.getElementById('statLine').textContent,
+          status: document.getElementById('importStatus').textContent,
+        };
+      `).then((r) => ({ edited: r.edited, stat: r.stat, hasMessage: r.status.includes('恢复 2 条') })),
+      { edited: 2, stat: `已填写 2 / ${total}`, hasMessage: true }
+    );
+
+    equal(
+      '读取 CSV 后第一张卡片的内容与补假选择正确',
+      await cdp.eval(`
+        const card = document.querySelector('.card[data-index="0"]');
+        const radios = [...card.querySelectorAll('input[type=radio]')];
+        return {
+          reason: card.querySelector('textarea').value,
+          checked: radios.filter((r) => r.checked).map((r) => r.value),
+        };
+      `),
+      { reason: '导入的理由', checked: ['no'] }
+    );
+
+    await cdp.eval(`document.getElementById('importClose').click(); return true;`);
+    equal('关闭导入弹窗', await cdp.eval(`return document.getElementById('importBackdrop').hidden;`), true);
   } finally {
     if (cdp) {
       try {

@@ -23,10 +23,14 @@ const {
 } = require('./lib/export');
 const { writeClipboard } = require('./lib/clipboard');
 const { openUrl, revealPath } = require('./lib/system');
+const { parseLeaveCsv, matchRecords } = require('./lib/import');
+const { pickCsvFile } = require('./lib/dialog');
 
 const APP_DIR = __dirname;
 const WEB_DIR = path.join(APP_DIR, 'web');
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_IMPORT_FILE_BYTES = 8 * 1024 * 1024;
+const IMPORT_MAX_BODY_BYTES = Math.ceil((MAX_IMPORT_FILE_BYTES * 4) / 3) + 1024 * 1024;
 
 /** 可选的本地配置文件名（放在项目根目录，已被 .gitignore 排除，不会进入版本库） */
 const LOCAL_CONFIG_FILE = 'local-config.json';
@@ -51,12 +55,18 @@ function readLocalConfig(dir = APP_DIR) {
   }
 }
 
-/** 解析导出标题及其来源：--title > 环境变量 > 本地配置 > 中性默认值 */
-function resolveTitle(options, dir = APP_DIR) {
+/**
+ * 解析导出标题及其来源：
+ *   --title > 花名册文件名（自动去掉“副本 / (1)”等） > 环境变量 > 本地配置 > 中性默认值
+ * 花名册可以随时重新扫描 / 切换，因此调用方可以每次传入当前花名册的 displayName。
+ */
+function resolveTitle(options, dir = APP_DIR, rosterName = '') {
+  if (options.title) return { title: String(options.title), source: '--title 参数' };
+  if (rosterName) return { title: String(rosterName), source: '花名册文件名' };
+
   const localConfig = readLocalConfig(dir);
   const localTitle = localConfig && typeof localConfig.title === 'string' ? localConfig.title.trim() : '';
 
-  if (options.title) return { title: String(options.title), source: '--title 参数' };
   if (process.env.CLASS_LEAVE_TITLE) {
     return { title: process.env.CLASS_LEAVE_TITLE, source: '环境变量 CLASS_LEAVE_TITLE' };
   }
@@ -88,7 +98,7 @@ function printHelp() {
       '  -r, --roster <文件>     指定花名册文件（默认自动在当前工作文件夹中查找）',
       '  -p, --port <端口>       指定端口（默认自动选择空闲端口）',
       '      --export-dir <目录> 指定导出目录（默认项目根目录）',
-      '      --title <文本>      指定导出文本的第一行标题（默认取 local-config.json，否则为本班请假登记）',
+      '      --title <文本>      覆盖导出文本的第一行标题（默认取当前花名册文件名）',
       '      --no-open           启动后不自动打开窗口',
       '  -h, --help              显示本帮助',
       '',
@@ -116,18 +126,19 @@ function securityHeaders(extra = {}) {
 }
 
 function sendJson(res, status, payload) {
+  if (res.writableEnded || res.destroyed) return;
   const body = Buffer.from(JSON.stringify(payload), 'utf8');
   res.writeHead(status, securityHeaders({ 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': body.length }));
   res.end(body);
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     req.on('data', (chunk) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(new Error('请求内容过大'));
         req.destroy();
         return;
@@ -150,7 +161,6 @@ function parseJsonBody(raw) {
 
 function createServer(context) {
   const { appDir, exportDir, title } = context;
-  const exportTitle = title === null || title === undefined ? DEFAULT_TITLE : String(title);
   const allowedDirs = defaultSearchDirs(appDir).map((d) => path.resolve(d));
 
   const isAllowedRosterPath = (candidate) => {
@@ -164,6 +174,14 @@ function createServer(context) {
     errorDetails: null,
     loadedAt: null,
   };
+
+  /** 每次导出时按“当前花名册”解析标题，重新扫描 / 切换花名册后自动跟着变 */
+  const resolveCurrentTitle = () =>
+    resolveTitle(
+      { title: title === null || title === undefined ? null : String(title) },
+      appDir,
+      state.roster && state.roster.displayName ? state.roster.displayName : ''
+    );
 
   const loadRoster = (rosterPath) => {
     try {
@@ -185,6 +203,59 @@ function createServer(context) {
       };
       log(`读取花名册失败：${err.message}`);
     }
+  };
+
+  let pickingFile = false;
+
+  /**
+   * 统一处理“读取 CSV”的结果：解析 + 与花名册匹配，然后返回给前端。
+   * buffer 既可能来自拖拽上传，也可能来自原生文件选择窗口。
+   */
+  const respondImport = (res, buffer, fileName, sourcePath) => {
+    if (!state.roster || !Array.isArray(state.roster.students) || state.roster.students.length === 0) {
+      return sendJson(res, 400, { ok: false, error: '尚未成功读取花名册，无法读取 CSV。' });
+    }
+    if (!buffer || buffer.length === 0) {
+      return sendJson(res, 400, { ok: false, error: 'CSV 文件是空的（0 字节）。' });
+    }
+    if (buffer.length > MAX_IMPORT_FILE_BYTES) {
+      return sendJson(res, 400, { ok: false, error: 'CSV 文件过大（超过 8 MB）。' });
+    }
+
+    let parsed;
+    try {
+      parsed = parseLeaveCsv(buffer);
+    } catch (err) {
+      return sendJson(res, 400, { ok: false, error: err.message });
+    }
+
+    const report = matchRecords(state.roster.students, parsed.records);
+    const warnings = [...parsed.warnings];
+    if (report.unmatched.length > 0) {
+      const sample = report.unmatched.slice(0, 5).map((item) => item.name).join('、');
+      warnings.push(
+        `CSV 中有 ${report.unmatched.length} 条记录在花名册里找不到对应学生` +
+          `${sample ? `（${sample}${report.unmatched.length > 5 ? ' 等' : ''}）` : ''}。`
+      );
+    }
+
+    log(`读取 CSV：${fileName}（${parsed.records.length} 条请假记录，匹配 ${report.matched.length} 条）`);
+    return sendJson(res, 200, {
+      ok: true,
+      canceled: false,
+      fileName,
+      sourcePath,
+      encoding: parsed.encoding,
+      delimiter: parsed.delimiter,
+      totalRecords: parsed.records.length,
+      matched: report.matched,
+      unmatched: report.unmatched,
+      warnings,
+      message:
+        report.matched.length === 0
+          ? `已读取「${fileName}」，但没有可导入的请假记录。`
+          : `已从「${fileName}」读取并匹配 ${report.matched.length} 条请假记录。`,
+    });
   };
 
   const server = http.createServer(async (req, res) => {
@@ -213,7 +284,7 @@ function createServer(context) {
           errorDetails: state.errorDetails,
           loadedAt: state.loadedAt,
           exportDir: exportDir || defaultExportDir(),
-          exportTitle,
+          exportTitle: resolveCurrentTitle().title,
         });
       }
 
@@ -233,7 +304,7 @@ function createServer(context) {
           error: state.error,
           errorDetails: state.errorDetails,
           exportDir: exportDir || defaultExportDir(),
-          exportTitle,
+          exportTitle: resolveCurrentTitle().title,
         });
       }
 
@@ -245,7 +316,7 @@ function createServer(context) {
         if (records.length === 0) {
           return sendJson(res, 400, { ok: false, error: '目前没有任何学生填写请假信息，没有可复制的内容。' });
         }
-        const tsv = buildTsv(records, { title: exportTitle });
+        const tsv = buildTsv(records, { title: resolveCurrentTitle().title });
         await writeClipboard(tsv);
         return sendJson(res, 200, {
           ok: true,
@@ -259,6 +330,7 @@ function createServer(context) {
         const body = parseJsonBody(await readBody(req));
         const all = normalizeRecords(body.records);
         const records = selectLeaveRecords(all);
+        const exportTitle = resolveCurrentTitle().title;
         const tsv = buildTsv(records, { title: exportTitle });
         const csv = writeCsv(records, { dir: exportDir || defaultExportDir(), title: exportTitle });
         let clipboardWarning = null;
@@ -294,6 +366,61 @@ function createServer(context) {
         return sendJson(res, 200, { ok: true });
       }
 
+      // 读取 CSV：浏览器拖拽 / 直接上传（内容以 base64 传输，服务端负责识别编码）
+      if (req.method === 'POST' && pathname === '/api/import') {
+        const body = parseJsonBody(await readBody(req, IMPORT_MAX_BODY_BYTES));
+        let buffer = null;
+        if (typeof body.contentBase64 === 'string' && body.contentBase64.trim() !== '') {
+          buffer = Buffer.from(body.contentBase64, 'base64');
+        } else if (typeof body.content === 'string' && body.content !== '') {
+          buffer = Buffer.from(body.content, 'utf8');
+        } else {
+          return sendJson(res, 400, { ok: false, error: '没有收到 CSV 内容。' });
+        }
+        const fileName =
+          typeof body.fileName === 'string' && body.fileName.trim() !== '' ? body.fileName.trim() : '（上传的 CSV）';
+        return respondImport(res, buffer, fileName, null);
+      }
+
+      // 读取 CSV：弹出本机原生文件选择窗口，默认打开导出目录（CSV 默认保存位置）
+      if (req.method === 'POST' && pathname === '/api/pick-csv') {
+        if (!state.roster || !Array.isArray(state.roster.students) || state.roster.students.length === 0) {
+          return sendJson(res, 400, { ok: false, error: '尚未成功读取花名册，无法读取 CSV。' });
+        }
+        if (pickingFile) {
+          return sendJson(res, 409, { ok: false, error: '已有一个文件选择窗口打开，请先完成或取消。' });
+        }
+        const dir = exportDir || defaultExportDir();
+        pickingFile = true;
+        let picked;
+        try {
+          picked = await pickCsvFile({ initialDir: dir, title: '选择要读取的 CSV 文件' });
+        } finally {
+          pickingFile = false;
+        }
+        if (!picked || !picked.path) {
+          return sendJson(res, 200, { ok: true, canceled: true });
+        }
+        const chosen = path.resolve(picked.path);
+        if (!/\.csv$/i.test(chosen)) {
+          return sendJson(res, 400, { ok: false, error: '请选择 .csv 文件。' });
+        }
+        let buffer;
+        try {
+          const stat = fs.statSync(chosen);
+          if (!stat.isFile()) {
+            return sendJson(res, 400, { ok: false, error: '选择的路径不是文件。' });
+          }
+          if (stat.size > MAX_IMPORT_FILE_BYTES) {
+            return sendJson(res, 400, { ok: false, error: 'CSV 文件过大（超过 8 MB）。' });
+          }
+          buffer = fs.readFileSync(chosen);
+        } catch (err) {
+          return sendJson(res, 400, { ok: false, error: `无法读取文件：${err.message}` });
+        }
+        return respondImport(res, buffer, path.basename(chosen), chosen);
+      }
+
       sendJson(res, 404, { ok: false, error: '接口不存在' });
     } catch (err) {
       const status = err instanceof RosterError ? 400 : 500;
@@ -324,7 +451,7 @@ function createServer(context) {
   }
 
   server.on('error', () => {});
-  return { server, state, loadRoster };
+  return { server, state, loadRoster, resolveCurrentTitle };
 }
 
 function log(message) {
@@ -355,16 +482,15 @@ function main() {
   const exportDir = options.exportDir ? path.resolve(options.exportDir) : null;
   if (exportDir) process.env.CLASS_LEAVE_EXPORT_DIR = exportDir;
 
-  const { title, source: titleSource } = resolveTitle(options);
-
   const context = {
     appDir: APP_DIR,
     rosterPath: options.rosterPath ? path.resolve(options.rosterPath) : null,
     exportDir,
-    title,
+    // 只有显式的 --title 才作为最高优先级；其余标题在导出时按当前花名册动态解析
+    title: options.title ? String(options.title) : null,
   };
 
-  const { server, state, loadRoster } = createServer(context);
+  const { server, state, loadRoster, resolveCurrentTitle } = createServer(context);
   loadRoster(null);
 
   server.on('error', (err) => {
@@ -377,7 +503,8 @@ function main() {
     const url = `http://127.0.0.1:${port}/`;
     log(`界面地址：${url}`);
     log(`导出目录：${exportDir || defaultExportDir()}`);
-    log(`导出文本首行标题：${title}（来源：${titleSource}；只导出已填写请假信息的学生）`);
+    const { title: currentTitle, source: titleSource } = resolveCurrentTitle();
+    log(`导出文本首行标题：${currentTitle}（来源：${titleSource}；只导出已填写请假信息的学生）`);
     if (!state.roster) log(`注意：尚未成功读取花名册，请按界面提示处理。`);
     log('按 Control+C 退出程序（关闭后本次填写的数据不会保留）。');
     if (options.open) openWindow(url).then((message) => log(message));

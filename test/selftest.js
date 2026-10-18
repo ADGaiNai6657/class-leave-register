@@ -16,7 +16,8 @@ const zlib = require('node:zlib');
 const { readXls } = require('../lib/xls');
 const { readXlsx } = require('../lib/xlsx');
 const { decodeText, parseDelimited, sniffDelimiter, readDelimited, readJson } = require('../lib/delimited');
-const { isNameLike, loadRoster, resolveRoster, RosterError, discoverRosterFiles, defaultSearchDirs } = require('../lib/roster');
+const { isNameLike, loadRoster, resolveRoster, RosterError, discoverRosterFiles, defaultSearchDirs, rosterDisplayName } = require('../lib/roster');
+const { parseLeaveCsv, matchRecords } = require('../lib/import');
 const {
   csvEscape,
   buildCsv,
@@ -395,13 +396,18 @@ test('存在多个花名册时要求用户明确选择', () => {
   );
 });
 
-test('忽略无关文件（package.json、.DS_Store 等）', () => {
+test('忽略无关文件（package.json、.DS_Store、本应用导出的 CSV 等）', () => {
   const dir = freshTmp('discover-ignore');
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
   fs.writeFileSync(path.join(dir, '.DS_Store'), 'junk');
+  fs.writeFileSync(
+    path.join(dir, '请假登记-20240101-120000.csv'),
+    '本班请假登记\n姓名,请假理由,是否补假\n张三,事假,否\n'
+  );
   fs.writeFileSync(path.join(dir, 'roster.csv'), '姓名\n张三\n李四\n');
   const roster = resolveRoster({ appDir: dir });
   assert.equal(roster.studentCount, 2);
+  assert.equal(roster.fileName, 'roster.csv', '导出的登记 CSV 不应被当作花名册候选');
 });
 
 // ---------------------------------------------------------------- 导出格式
@@ -473,18 +479,31 @@ test('标题行可以覆盖（--title / 环境变量之外的直接传参）', (
   assert.equal(buildTsv([]).split('\n')[0], DEFAULT_TITLE, '空数据也保留标题');
 });
 
-test('导出标题优先级：--title > 环境变量 > local-config.json > 中性默认值', () => {
+test('花名册文件名可推导导出标题（去掉副本 / (1) / 花名册等）', () => {
+  assert.equal(rosterDisplayName('初三2班 - 副本 (1).xls'), '初三2班');
+  assert.equal(rosterDisplayName('初三2班(1).xlsx'), '初三2班');
+  assert.equal(rosterDisplayName('高一(3)班 花名册.xlsx'), '高一(3)班');
+  assert.equal(rosterDisplayName('2024级名单.csv'), '2024级');
+  assert.equal(rosterDisplayName('class - Copy (2).xlsx'), 'class');
+  assert.equal(rosterDisplayName('花名册.xlsx'), '花名册');
+  assert.equal(rosterDisplayName(''), '');
+});
+
+test('导出标题优先级：--title > 花名册文件名 > 环境变量 > local-config.json > 中性默认值', () => {
   const { resolveTitle, LOCAL_CONFIG_FILE } = require('../server');
 
   const withConfig = freshTmp('title-config');
   fs.writeFileSync(path.join(withConfig, LOCAL_CONFIG_FILE), JSON.stringify({ title: '本某某班' }));
   assert.equal(resolveTitle({ title: null }, withConfig).title, '本某某班', '本地配置生效');
   assert.equal(resolveTitle({ title: '本某甲班' }, withConfig).title, '本某甲班', '--title 优先于本地配置');
+  assert.equal(resolveTitle({ title: null }, withConfig, '初三2班').title, '初三2班', '花名册名优先于本地配置');
+  assert.equal(resolveTitle({ title: '本某甲班' }, withConfig, '初三2班').title, '本某甲班', '--title 仍最高');
 
   process.env.CLASS_LEAVE_TITLE = '本某乙班';
   try {
     assert.equal(resolveTitle({ title: null }, withConfig).title, '本某乙班', '环境变量优先于本地配置');
     assert.equal(resolveTitle({ title: '本某甲班' }, withConfig).title, '本某甲班', '--title 优先级最高');
+    assert.equal(resolveTitle({ title: null }, withConfig, '初三2班').title, '初三2班', '花名册名优先于环境变量');
   } finally {
     delete process.env.CLASS_LEAVE_TITLE;
   }
@@ -492,6 +511,7 @@ test('导出标题优先级：--title > 环境变量 > local-config.json > 中�
   const noConfig = freshTmp('title-none');
   assert.equal(resolveTitle({ title: null }, noConfig).title, DEFAULT_TITLE, '没有本地配置时用中性默认值');
   assert.ok(DEFAULT_TITLE.includes('本班'), '默认标题应是中性值，不含具体班级名');
+  assert.equal(resolveTitle({ title: null }, noConfig, '初三2班').title, '初三2班', '有花名册名时跟着花名册走');
 
   fs.writeFileSync(path.join(noConfig, LOCAL_CONFIG_FILE), '{ 这不是合法 JSON');
   assert.equal(resolveTitle({ title: null }, noConfig).title, DEFAULT_TITLE, '坏配置不中断，退回默认值');
@@ -562,6 +582,52 @@ test('默认导出目录是项目根目录（不是桌面），且文件管理�
   assert.equal(isInsideExportDir(inside), true);
   assert.equal(isInsideExportDir('/etc/passwd'), false);
   assert.equal(isInsideExportDir(path.join(defaultExportDir(), '..', 'x.csv')), false);
+});
+
+// ---------------------------------------------------------------- 读取 CSV
+
+test('读取 CSV：能解析本应用导出的格式（标题 + 表头 + 引号 / 字段内换行）', () => {
+  const csv = buildCsv([
+    { name: '张三', reason: '身体不适，需要休息', makeup: false },
+    { name: '李四', reason: '参加考试，需要"提前"离校\n并复诊', makeup: true },
+  ]);
+  const parsed = parseLeaveCsv(Buffer.from(csv, 'utf8'));
+  assert.equal(parsed.title, DEFAULT_TITLE);
+  assert.match(parsed.encoding, /^utf-8/);
+  assert.deepEqual(parsed.records, [
+    { name: '张三', reason: '身体不适，需要休息', makeup: false },
+    { name: '李四', reason: '参加考试，需要"提前"离校\n并复诊', makeup: true },
+  ]);
+});
+
+test('读取 CSV：没有标题行、制表符分隔、未选择补假都能识别', () => {
+  const text = '姓名\t请假理由\t是否补假\n王五\t事假\t\n赵六\t\t是\n';
+  const parsed = parseLeaveCsv(Buffer.from(text, 'utf8'));
+  assert.deepEqual(parsed.records, [
+    { name: '王五', reason: '事假', makeup: null },
+    { name: '赵六', reason: '', makeup: true },
+  ]);
+});
+
+test('读取 CSV：缺少姓名表头或空文件时明确报错', () => {
+  assert.throws(() => parseLeaveCsv(Buffer.from('a,b,c\n1,2,3', 'utf8')), /无法识别 CSV 表头/);
+  assert.throws(() => parseLeaveCsv(Buffer.alloc(0)), /空的/);
+});
+
+test('读取 CSV：按姓名匹配花名册，重复姓名按顺序对应，找不到的进入 unmatched', () => {
+  const students = [{ name: '张三' }, { name: '李四' }, { name: '张三' }];
+  const records = [
+    { name: '张三', reason: '事假', makeup: true },
+    { name: '张三', reason: '病假', makeup: false },
+    { name: '李四', reason: '考试', makeup: null },
+    { name: '王五', reason: '未知', makeup: null },
+  ];
+  const report = matchRecords(students, records);
+  assert.equal(report.matched.length, 3);
+  assert.equal(report.matched[0].index, 0);
+  assert.equal(report.matched[1].index, 2);
+  assert.equal(report.matched[2].index, 1);
+  assert.deepEqual(report.unmatched.map((r) => r.name), ['王五']);
 });
 
 test('清理临时目录', () => {

@@ -551,6 +551,62 @@ body {
   color: var(--danger);
 }
 
+.modal-status.warn {
+  color: #a2660a;
+}
+
+/* ---------- 读取 CSV 拖拽区 ---------- */
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 26px 16px;
+  border: 1.5px dashed var(--border-strong);
+  border-radius: 12px;
+  background: #fafbfc;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: #f2f6fe;
+}
+
+.dropzone.dragover {
+  border-color: var(--accent);
+  background: #e8f0fe;
+  box-shadow: inset 0 0 0 2px rgba(47, 111, 237, 0.18);
+}
+
+.dropzone.busy,
+.dropzone[aria-busy="true"] {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.dropzone-icon {
+  font-size: 22px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.dropzone-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dropzone-desc {
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
 .modal-foot {
   margin-top: 12px;
   display: flex;

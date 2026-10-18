@@ -22,6 +22,7 @@
             <button type="button" data-size="large">大</button>
           </div>
         </div>
+        <button type="button" class="btn" id="importBtn">读取 CSV</button>
         <button type="button" class="btn primary" id="exportBtn">导出</button>
       </div>
     </header>
@@ -56,6 +57,28 @@
         <div class="modal-foot">
           <button type="button" class="btn ghost" id="revealBtn" hidden>在文件夹中显示</button>
           <button type="button" class="btn ghost" id="modalCloseBottom">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="importBackdrop" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+        <div class="modal-head">
+          <h2 id="importTitle">读取 CSV 登记数据</h2>
+          <button type="button" class="icon-btn" id="importClose" aria-label="关闭">✕</button>
+        </div>
+        <p class="modal-summary">
+          可以读取本应用导出的「请假登记-*.csv」，也支持表头为「姓名 / 请假理由 / 是否补假」的 CSV。
+        </p>
+        <div class="dropzone" id="dropZone" tabindex="0" role="button" aria-label="拖拽 CSV 到此处，或点击选择文件">
+          <div class="dropzone-icon" aria-hidden="true">⇩</div>
+          <div class="dropzone-title">把 CSV 文件拖到这里</div>
+          <div class="dropzone-desc">或点击此处选择文件（默认打开 CSV 的导出目录）</div>
+        </div>
+        <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+        <div class="modal-status" id="importStatus" role="status" aria-live="polite"></div>
+        <div class="modal-foot">
+          <button type="button" class="btn ghost" id="importCloseBottom">关闭</button>
         </div>
       </div>
     </div>

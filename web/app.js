@@ -20,6 +20,7 @@
     exportDir: '',
     exportTitle: '',
     busy: false,
+    importing: false,
   };
 
   const els = {
@@ -37,6 +38,13 @@
     copyBtn: document.getElementById('copyBtn'),
     copyCsvBtn: document.getElementById('copyCsvBtn'),
     revealBtn: document.getElementById('revealBtn'),
+    importBtn: document.getElementById('importBtn'),
+    importBackdrop: document.getElementById('importBackdrop'),
+    importClose: document.getElementById('importClose'),
+    importCloseBottom: document.getElementById('importCloseBottom'),
+    importStatus: document.getElementById('importStatus'),
+    dropZone: document.getElementById('dropZone'),
+    fileInput: document.getElementById('fileInput'),
   };
 
   const MAKEUP_LABEL = { true: '是', false: '否' };
@@ -446,6 +454,149 @@
     }
   }
 
+  // ---------------------------------------------------------------- 读取 CSV
+
+  const IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+
+  function setImportStatus(text, kind) {
+    els.importStatus.textContent = text;
+    els.importStatus.className = `modal-status${kind ? ` ${kind}` : ''}`;
+  }
+
+  function setImportBusy(busy) {
+    state.importing = busy;
+    els.dropZone.setAttribute('aria-busy', busy ? 'true' : 'false');
+    els.dropZone.classList.toggle('busy', busy);
+  }
+
+  function openImport() {
+    if (state.importing) return;
+    setImportStatus('', '');
+    setImportBusy(false);
+    els.fileInput.value = '';
+    els.importBackdrop.hidden = false;
+    els.dropZone.focus();
+  }
+
+  function closeImport() {
+    els.importBackdrop.hidden = true;
+    setImportStatus('', '');
+    setImportBusy(false);
+  }
+
+  /** ArrayBuffer -> base64（分块转换，避免大文件时参数过多） */
+  function toBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunk = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  }
+
+  function csvFileProblem(file) {
+    if (!file) return '没有选择文件。';
+    if (!/\.csv$/i.test(file.name || '')) return '请选择 .csv 文件。';
+    if (file.size > IMPORT_MAX_BYTES) return 'CSV 文件过大（超过 8 MB）。';
+    return '';
+  }
+
+  /** 把服务端返回的匹配结果应用到卡片上（先清空，再按 CSV 恢复） */
+  function applyImportReport(data) {
+    if (!data || !Array.isArray(data.matched)) {
+      setImportStatus('服务返回的数据无法识别。', 'error');
+      return;
+    }
+    if (data.matched.length === 0) {
+      setImportStatus(
+        data.message || `没有从「${data.fileName || 'CSV'}」中读到可导入的请假记录。`,
+        'error'
+      );
+      return;
+    }
+    if (editedCount() > 0 && !window.confirm('读取 CSV 会覆盖当前已填写的内容，确定继续吗？')) {
+      setImportStatus('已取消，当前填写内容未改变。', '');
+      return;
+    }
+
+    state.students.forEach((student) => {
+      student.reason = '';
+      student.makeup = null;
+      student.edited = false;
+    });
+
+    let applied = 0;
+    for (const item of data.matched) {
+      let index = Number.isInteger(item.index) ? item.index : -1;
+      let student = state.students[index];
+      // 极端情况下（花名册在弹窗期间被重新扫描）索引可能对不上，按姓名兜底
+      if (!student || student.name !== item.name) {
+        index = state.students.findIndex((s) => s.name === item.name && !s.edited);
+        student = state.students[index];
+      }
+      if (!student) continue;
+      student.reason = typeof item.reason === 'string' ? item.reason : '';
+      student.makeup = item.makeup === true ? true : item.makeup === false ? false : null;
+      student.edited = student.reason.trim() !== '' || student.makeup !== null;
+      applied += 1;
+    }
+
+    renderGrid();
+
+    const parts = [`已从「${data.fileName || 'CSV'}」恢复 ${applied} 条请假记录。`];
+    if (data.unmatched && data.unmatched.length > 0) {
+      parts.push(`有 ${data.unmatched.length} 条记录在花名册中找不到对应学生，已跳过。`);
+    }
+    if (data.warnings && data.warnings.length > 0) parts.push(...data.warnings);
+    setImportStatus(parts.join(' '), data.unmatched && data.unmatched.length > 0 ? 'warn' : 'success');
+  }
+
+  /** 拖拽 / 浏览器文件选择：读取原始字节后上传，由服务端识别编码并解析 */
+  async function importFileObject(file) {
+    const problem = csvFileProblem(file);
+    if (problem) {
+      setImportStatus(problem, 'error');
+      return;
+    }
+    setImportBusy(true);
+    setImportStatus(`正在读取「${file.name}」……`, '');
+    try {
+      const buffer = await file.arrayBuffer();
+      const data = await api('/api/import', {
+        method: 'POST',
+        body: { fileName: file.name, contentBase64: toBase64(buffer) },
+      });
+      applyImportReport(data);
+    } catch (err) {
+      setImportStatus(`读取失败：${err.message}`, 'error');
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  /** 点击拖拽区：优先弹本机原生文件选择窗口（默认路径为导出目录），失败则退回浏览器选择 */
+  async function pickCsvViaServer() {
+    if (state.importing) return;
+    setImportBusy(true);
+    setImportStatus('正在打开文件选择窗口……', '');
+    let fallback = false;
+    try {
+      const data = await api('/api/pick-csv', { method: 'POST' });
+      if (data.canceled) {
+        setImportStatus('已取消。', '');
+      } else {
+        applyImportReport(data);
+      }
+    } catch (err) {
+      fallback = true;
+      setImportStatus(`无法打开系统文件选择窗口（${err.message}），已改用浏览器选择。`, 'error');
+    } finally {
+      setImportBusy(false);
+    }
+    if (fallback) els.fileInput.click();
+  }
+
   // ---------------------------------------------------------------- 事件绑定
 
   els.sizeGroup.addEventListener('click', (event) => {
@@ -461,12 +612,71 @@
   els.copyCsvBtn.addEventListener('click', doCopyAndCsv);
   els.revealBtn.addEventListener('click', revealFile);
 
+  // —— 读取 CSV ——
+  els.importBtn.addEventListener('click', openImport);
+  els.importClose.addEventListener('click', closeImport);
+  els.importCloseBottom.addEventListener('click', closeImport);
+  els.importBackdrop.addEventListener('click', (event) => {
+    if (event.target === els.importBackdrop) closeImport();
+  });
+  els.dropZone.addEventListener('click', pickCsvViaServer);
+  els.dropZone.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      pickCsvViaServer();
+    }
+  });
+  els.fileInput.addEventListener('change', () => {
+    const file = els.fileInput.files && els.fileInput.files[0];
+    els.fileInput.value = '';
+    if (file) importFileObject(file);
+  });
+
+  for (const type of ['dragenter', 'dragover']) {
+    els.dropZone.addEventListener(type, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!state.importing) els.dropZone.classList.add('dragover');
+    });
+  }
+  for (const type of ['dragleave', 'dragend']) {
+    els.dropZone.addEventListener(type, (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      els.dropZone.classList.remove('dragover');
+    });
+  }
+  els.dropZone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    els.dropZone.classList.remove('dragover');
+    if (state.importing) return;
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    if (!file) {
+      setImportStatus('没有检测到拖入的文件。', 'error');
+      return;
+    }
+    importFileObject(file);
+  });
+
+  // 避免拖拽落点偏离拖拽区时，浏览器直接打开被拖入的文件
+  for (const type of ['dragover', 'drop']) {
+    window.addEventListener(type, (event) => {
+      if (event.dataTransfer && Array.from(event.dataTransfer.types || []).includes('Files')) {
+        event.preventDefault();
+      }
+    });
+  }
+
   els.modalBackdrop.addEventListener('click', (event) => {
     if (event.target === els.modalBackdrop) closeModal();
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !els.modalBackdrop.hidden) closeModal();
+    if (event.key === 'Escape') {
+      if (!els.modalBackdrop.hidden) closeModal();
+      if (!els.importBackdrop.hidden) closeImport();
+    }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') {
       event.preventDefault();
       if (els.modalBackdrop.hidden) openModal();
