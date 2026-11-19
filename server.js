@@ -308,12 +308,13 @@ function createServer(context) {
         });
       }
 
-      // 导出只保留“请假的人”（填了理由，或选了是否补假）
       if (req.method === 'POST' && (pathname === '/api/clipboard' || pathname === '/api/export')) {
         const body = parseJsonBody(await readBody(req));
         const all = normalizeRecords(body.records);
         const rosterMode = body.mode === 'roster';
-        const records = rosterMode ? all : selectLeaveRecords(all);
+        const includeUnfilled = typeof body.includeUnfilled === 'boolean' ? body.includeUnfilled : rosterMode;
+        const records = includeUnfilled ? all : selectLeaveRecords(all);
+        const emptyMessage = rosterMode ? '当前导出范围没有学生记录' : '目前没有任何学生填写请假信息';
         const options = { title: resolveCurrentTitle().title, dir: exportDir || defaultExportDir() };
         if (rosterMode) {
           options.title = '花名册';
@@ -326,7 +327,7 @@ function createServer(context) {
         const clipboardText = buildClipboardText(records, options);
         if (pathname === '/api/clipboard') {
           if (records.length === 0) {
-            const error = rosterMode ? '花名册没有学生数据。' : '目前没有任何学生填写请假信息，没有可复制的内容。';
+            const error = `${emptyMessage}，没有可复制的内容。`;
             return sendJson(res, 400, { ok: false, error });
           }
           await writeClipboard(clipboardText);
@@ -334,7 +335,7 @@ function createServer(context) {
             ok: true,
             rowCount: records.length,
             skipped: all.length - records.length,
-            message: `已复制 ${records.length} 行到剪切板${rosterMode ? '' : '（只包含已填写请假信息的学生）'}`,
+            message: `已复制 ${records.length} 行到剪切板${includeUnfilled || rosterMode ? '' : '（只包含已填写请假信息的学生）'}`,
           });
         }
 
@@ -342,15 +343,15 @@ function createServer(context) {
         let clipboardWarning = null;
         try {
           if (records.length === 0) {
-            throw new Error(rosterMode ? '花名册没有学生数据' : '目前没有任何学生填写请假信息');
+            throw new Error(emptyMessage);
           }
           await writeClipboard(clipboardText);
         } catch (err) {
           clipboardWarning = err.message;
         }
-        const scope = rosterMode ? `包含 ${records.length} 名学生` : records.length === 0
-          ? '没有学生填写请假信息，CSV 中只有标题和表头'
-          : `只包含 ${records.length} 名已填写请假信息的学生`;
+        let scope = `包含 ${records.length} 名学生`;
+        if (records.length === 0) scope = `${emptyMessage}，CSV 中只有标题和表头`;
+        else if (!includeUnfilled) scope = `只包含 ${records.length} 名已填写${rosterMode ? '' : '请假信息'}的学生`;
         return sendJson(res, 200, {
           ok: true,
           rowCount: records.length,

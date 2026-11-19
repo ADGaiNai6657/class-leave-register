@@ -79,14 +79,8 @@
     return state.students.filter((s) => s.edited).length;
   }
 
-  function payloadRecords() {
-    // 只提交“请假的人”（填了请假理由，或选择了是否补假）；服务端会再过滤一次
-    return state.students
-      .filter((s) => s.reason.trim() !== '' || s.makeup !== null)
-      .map((s) => ({ name: s.name, reason: s.reason, makeup: s.makeup }));
-  }
-
   const rosterGrid = document.getElementById('rosterGrid');
+  const includeUnfilled = document.getElementById('includeUnfilled');
   const menuBtn = document.getElementById('menuBtn');
   const pageDrawer = document.getElementById('pageDrawer');
   const drawerShade = document.getElementById('drawerShade');
@@ -197,11 +191,17 @@
     menuBtn.focus();
   });
 
+  function exportRecords() {
+    return activePage === 'roster' ? rosterForm.records : state.students;
+  }
+
   function exportPayload() {
+    const records = exportRecords().map(({ name, reason, makeup }) => ({ name, reason, makeup }));
+    const payload = { records, includeUnfilled: includeUnfilled.checked };
     if (activePage === 'roster') {
-      return { mode: 'roster', headers: rosterForm.headers, records: rosterForm.records };
+      return { ...payload, mode: 'roster', headers: rosterForm.headers };
     }
-    return { records: payloadRecords() };
+    return payload;
   }
 
   // ---------------------------------------------------------------- 渲染
@@ -515,25 +515,23 @@
 
   // ---------------------------------------------------------------- 导出
 
+  function updateExportSummary() {
+    const records = exportRecords();
+    const filled = records.filter((record) => record.reason.trim() !== '' || record.makeup !== null).length;
+    const count = includeUnfilled.checked ? records.length : filled;
+    const title = activePage === 'roster' ? '花名册' : state.exportTitle || '（未设置）';
+    let summary = `共 ${records.length} 名学生，已填写 ${filled} 名，本次导出 ${count} 名。首行标题：${title}。CSV 保存到：${state.exportDir || '项目根目录'}。`;
+    if (count === 0) summary += '当前范围内没有记录，CSV 仅包含标题和表头。';
+    els.modalSummary.textContent = summary;
+  }
+
   function openModal() {
-    const isRoster = activePage === 'roster';
-    if ((isRoster ? rosterForm.records : state.students).length === 0) {
+    if (exportRecords().length === 0) {
       window.alert('当前没有可导出的学生数据，请先解决花名册读取问题。');
       return;
     }
-    const total = state.students.length;
-    const done = editedCount();
-    const missingMakeup = state.students.filter((s) => s.reason.trim() !== '' && s.makeup === null).length;
-    let summary = `共 ${total} 名学生，已填写 ${done} 名。导出只保留这 ${done} 名请假的学生的信息。首行标题：${state.exportTitle || '（未设置）'}。CSV 保存到：${state.exportDir || '项目根目录'}。`;
-    if (done === 0) {
-      summary += '目前还没有人填写请假信息，导出内容将只有标题和表头。';
-    }
-    if (missingMakeup > 0) {
-      summary += `其中 ${missingMakeup} 名只填了理由、未选是否补假（可不选），导出时该字段留空。`;
-    }
-    els.modalSummary.textContent = isRoster
-      ? `导出全部 ${rosterForm.records.length} 名学生。未填写的字段留空。CSV 保存到：${state.exportDir || '项目根目录'}。`
-      : summary;
+    includeUnfilled.checked = activePage === 'roster';
+    updateExportSummary();
     setStatus('', '');
     els.revealBtn.hidden = true;
     els.modalBackdrop.hidden = false;
@@ -554,6 +552,7 @@
     state.busy = busy;
     els.copyBtn.disabled = busy;
     els.copyCsvBtn.disabled = busy;
+    includeUnfilled.disabled = busy;
   }
 
   async function doCopy() {
@@ -749,6 +748,7 @@
   });
 
   els.exportBtn.addEventListener('click', openModal);
+  includeUnfilled.addEventListener('change', updateExportSummary);
   els.modalClose.addEventListener('click', closeModal);
   els.modalCloseBottom.addEventListener('click', closeModal);
   els.copyBtn.addEventListener('click', doCopy);
