@@ -663,8 +663,9 @@ select {
 }
 
 .roster-columns {
+  --roster-column-limit: 4;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--roster-columns, 2), minmax(0, 1fr));
   align-items: start;
   gap: 24px;
   padding: 16px 24px 40px;
@@ -1448,9 +1449,21 @@ select {
 
 /* ---------------------------------------------------------------- 响应式 */
 
+@container (width < 1800px) {
+  .roster-columns {
+    --roster-column-limit: 3;
+  }
+}
+
+@container (width < 1350px) {
+  .roster-columns {
+    --roster-column-limit: 2;
+  }
+}
+
 @container (width < 900px) {
   .roster-columns {
-    grid-template-columns: minmax(0, 1fr);
+    --roster-column-limit: 1;
   }
 }
 

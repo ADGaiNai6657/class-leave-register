@@ -93,12 +93,17 @@
   const settingsDialog = document.getElementById('settingsDialog');
   const themeSetting = document.getElementById('themeSetting');
   const cardSizeSetting = document.getElementById('cardSizeSetting');
+  const startPageSetting = document.getElementById('startPageSetting');
+  const rosterColumnSetting = document.getElementById('rosterColumnSetting');
   const leaveScopeSetting = document.getElementById('leaveScopeSetting');
   const rosterScopeSetting = document.getElementById('rosterScopeSetting');
   const settingsStatus = document.getElementById('settingsStatus');
   const settingsKey = 'class-leave-register.settings';
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
-  const settings = { theme: 'system', cardSize: 'medium', leaveScope: false, rosterScope: true };
+  const settings = {
+    theme: 'system', cardSize: 'medium', leaveScope: false, rosterScope: true,
+    startPage: 'leave', rosterColumnCount: 2,
+  };
 
   try {
     const saved = JSON.parse(localStorage.getItem(settingsKey));
@@ -106,6 +111,8 @@
     if (['small', 'medium', 'large'].includes(saved?.cardSize)) settings.cardSize = saved.cardSize;
     if (typeof saved?.leaveScope === 'boolean') settings.leaveScope = saved.leaveScope;
     if (typeof saved?.rosterScope === 'boolean') settings.rosterScope = saved.rosterScope;
+    if (['leave', 'roster'].includes(saved?.startPage)) settings.startPage = saved.startPage;
+    if ([1, 2, 3, 4].includes(saved?.rosterColumnCount)) settings.rosterColumnCount = saved.rosterColumnCount;
   } catch {
     // 设置无法读取时使用默认值。
   }
@@ -131,6 +138,8 @@
   for (const button of document.querySelectorAll('[data-open-settings]')) {
     button.addEventListener('click', () => {
       cardSizeSetting.value = settings.cardSize;
+      startPageSetting.value = settings.startPage;
+      rosterColumnSetting.value = String(settings.rosterColumnCount);
       leaveScopeSetting.checked = settings.leaveScope;
       rosterScopeSetting.checked = settings.rosterScope;
       settingsDialog.showModal();
@@ -140,6 +149,11 @@
     if (event.target === themeSetting) {
       settings.theme = themeSetting.value;
       applyTheme();
+    } else if (event.target === startPageSetting) {
+      settings.startPage = startPageSetting.value;
+    } else if (event.target === rosterColumnSetting) {
+      settings.rosterColumnCount = Number(rosterColumnSetting.value);
+      renderRosterForm();
     } else {
       settings.cardSize = cardSizeSetting.value;
       settings.leaveScope = leaveScopeSetting.checked;
@@ -222,6 +236,7 @@
   function createRosterRecord(record) {
     const row = document.createElement('div');
     row.className = 'roster-record';
+    row.dataset.index = String(rosterForm.records.indexOf(record));
 
     const name = document.createElement('span');
     name.className = 'roster-name';
@@ -302,8 +317,21 @@
     return list;
   }
 
+  function effectiveRosterColumns() {
+    const limit = Number(getComputedStyle(rosterColumns).getPropertyValue('--roster-column-limit')) || 1;
+    return Math.min(settings.rosterColumnCount, limit);
+  }
+
   function renderRosterForm() {
     const records = rosterForm.records.filter((record) => matchesSearch(record.name));
+    const count = effectiveRosterColumns();
+    const focused = document.activeElement;
+    const focusedRow = focused?.closest('.roster-record');
+    const focusIndex = focusedRow?.dataset.index;
+    const focusControl = focusedRow ? [...focusedRow.querySelectorAll('input, button')].indexOf(focused) : -1;
+    const selection = focused?.tagName === 'INPUT' ? [focused.selectionStart, focused.selectionEnd] : null;
+    rosterColumns.dataset.columns = String(count);
+    rosterColumns.style.setProperty('--roster-columns', String(count));
     rosterColumns.replaceChildren();
 
     if (records.length === 0) {
@@ -312,14 +340,30 @@
       empty.textContent = rosterForm.records.length ? '没有匹配的学生。' : '花名册中没有学生。';
       rosterColumns.append(empty);
     } else {
-      const split = Math.ceil(records.length / 2);
-      rosterColumns.append(createRosterList(records.slice(0, split)), createRosterList(records.slice(split)));
+      // 按原名单顺序纵向分列，人数尽量均分，不生成空列。
+      const columns = Math.min(count, records.length);
+      let offset = 0;
+      for (let column = 0; column < columns; column += 1) {
+        const length = Math.floor(records.length / columns) + (column < records.length % columns ? 1 : 0);
+        rosterColumns.append(createRosterList(records.slice(offset, offset + length)));
+        offset += length;
+      }
     }
 
     for (const input of headerInputs) input.value = rosterForm.headers[input.dataset.header] || '';
     updateRosterSummary();
     updateSearchStatus();
+    if (focusIndex !== undefined && focusControl >= 0) {
+      const row = rosterColumns.querySelector(`[data-index="${focusIndex}"]`);
+      const control = row?.querySelectorAll('input, button')[focusControl];
+      control?.focus({ preventScroll: true });
+      if (control?.tagName === 'INPUT' && selection) control.setSelectionRange(...selection);
+    }
   }
+
+  new ResizeObserver(() => {
+    if (Number(rosterColumns.dataset.columns) !== effectiveRosterColumns()) renderRosterForm();
+  }).observe(workspace);
 
   for (const input of headerInputs) {
     input.addEventListener('input', () => {
@@ -345,7 +389,12 @@
   pageDrawer.addEventListener('click', (event) => {
     const button = event.target.closest('[data-page]');
     if (!button) return;
-    activePage = button.dataset.page;
+    selectPage(button.dataset.page);
+  });
+
+  function selectPage(page) {
+    activePage = page;
+    const button = pageDrawer.querySelector(`[data-page="${page}"]`);
     updateSearchStatus();
     const isRoster = activePage === 'roster';
     const label = button.querySelector('.nav-label');
@@ -361,7 +410,9 @@
       if (item === button) item.setAttribute('aria-current', 'page');
       else item.removeAttribute('aria-current');
     }
-  });
+  }
+
+  selectPage(settings.startPage);
 
   function exportRecords() {
     return activePage === 'roster' ? rosterForm.records : state.students;

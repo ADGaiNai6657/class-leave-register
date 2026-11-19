@@ -637,7 +637,7 @@ async function main() {
         settingKeys: Object.keys(JSON.parse(localStorage.getItem('class-leave-register.settings'))).sort(),
         session: Object.keys(sessionStorage).length, cookie: document.cookie,
       };`),
-      { local: ['class-leave-register.settings'], settingKeys: ['cardSize', 'leaveScope', 'rosterScope', 'theme'], session: 0, cookie: '' }
+      { local: ['class-leave-register.settings'], settingKeys: ['cardSize', 'leaveScope', 'rosterColumnCount', 'rosterScope', 'startPage', 'theme'], session: 0, cookie: '' }
     );
 
     const pageErrors = cdp.events
@@ -883,6 +883,99 @@ async function main() {
     await cdp.eval(`document.querySelector('[data-open-settings]').click(); return true;`);
     await cdp.waitFor("document.documentElement.dataset.theme === 'light'");
     await cdp.screenshot(path.join(SHOT_DIR, '06-设置-跟随系统.png'));
+    await cdp.eval(`document.getElementById('settingsDialog').close(); return true;`);
+
+    // ---------------------------------------------------------- 启动页面与花名册列数
+    const chooseSetting = (id, value) => cdp.eval(`
+      document.querySelector('[data-open-settings]').click();
+      const select = document.getElementById(${JSON.stringify(id)});
+      select.value = ${JSON.stringify(String(value))};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('settingsDialog').close();
+      return true;
+    `);
+    equal('新增设置默认请假登记、2列', await cdp.eval(`
+      document.querySelector('[data-open-settings]').click();
+      const values = [document.getElementById('startPageSetting').value, document.getElementById('rosterColumnSetting').value];
+      document.getElementById('settingsDialog').close(); return values;
+    `), ['leave', '2']);
+    await chooseSetting('startPageSetting', 'roster');
+    equal('修改启动页面不打断当前页面', await cdp.eval(`return document.getElementById('rosterGrid').hidden;`), true);
+    await cdp.send('Page.reload');
+    await cdp.waitFor("document.querySelectorAll('.roster-record').length > 0");
+    equal('刷新后进入花名册并同步导航和工具栏', await cdp.eval(`return {
+      roster: !document.getElementById('rosterGrid').hidden,
+      leave: document.getElementById('grid').hidden,
+      title: document.getElementById('pageTitle').textContent,
+      current: document.querySelector('[aria-current="page"]').dataset.page,
+      importHidden: document.getElementById('importBtn').hidden,
+      sizeHidden: document.getElementById('sizeGroup').parentElement.hidden,
+    };`), { roster: true, leave: true, title: '花名册', current: 'roster', importHidden: true, sizeHidden: true });
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 2100, height: 1000, deviceScaleFactor: 1, mobile: false });
+    for (const columns of [1, 2, 3, 4]) {
+      await chooseSetting('rosterColumnSetting', columns);
+      await cdp.waitFor(`document.getElementById('rosterColumns').dataset.columns === '${columns}'`);
+      const layout = await cdp.eval(`return {
+        columns: document.querySelectorAll('.roster-list').length,
+        names: [...document.querySelectorAll('.roster-name-text')].map((node) => node.textContent),
+        sizes: [...document.querySelectorAll('.roster-list')].map((list) => list.querySelectorAll('.roster-record').length),
+        gridColumns: getComputedStyle(document.getElementById('rosterColumns')).gridTemplateColumns.split(' ').length,
+      };`);
+      check(`${columns}列立即生效且人数均分`, layout.columns === columns && layout.gridColumns === columns
+        && Math.max(...layout.sizes) - Math.min(...layout.sizes) <= 1, layout.sizes);
+      equal(`${columns}列按名单顺序排列且无遗漏`, layout.names, expectedNames);
+    }
+    await cdp.eval(`
+      const input = document.querySelector('.roster-input');
+      input.value = '切换列数后保留'; input.dispatchEvent(new Event('input'));
+      input.focus(); input.setSelectionRange(2, 4); return true;
+    `);
+    for (const [width, columns] of [[1500, 3], [1000, 2], [600, 1], [320, 1], [2100, 4]]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
+      await cdp.waitFor(`document.getElementById('rosterColumns').dataset.columns === '${columns}'`);
+      equal(`${width}px 自动调整列数并保留输入和焦点`, await cdp.eval(`return {
+        lists: document.querySelectorAll('.roster-list').length,
+        text: document.querySelector('.roster-input').value,
+        focus: document.activeElement === document.querySelector('.roster-input'),
+        selection: [document.activeElement.selectionStart, document.activeElement.selectionEnd],
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };`), { lists: columns, text: '切换列数后保留', focus: true, selection: [2, 4], overflow: false });
+    }
+    await cdp.screenshot(path.join(SHOT_DIR, '07-花名册-4列.png'));
+    await searchFor(expectedNames[0]);
+    equal('多列搜索只生成有结果的列并保留填写', await cdp.eval(`return {
+      names: [...document.querySelectorAll('.roster-name-text')].map((node) => node.textContent),
+      text: document.querySelector('.roster-input').value,
+      emptyLists: [...document.querySelectorAll('.roster-list')].some((list) => !list.querySelector('.roster-record')),
+    };`), { names: expectedNames.filter((name) => name.startsWith(expectedNames[0])), text: '切换列数后保留', emptyLists: false });
+    await cdp.send('Page.reload');
+    await cdp.waitFor("document.querySelectorAll('.roster-record').length > 0");
+    equal('刷新保留启动页面和列数但不保留填写内容', await cdp.eval(`return {
+      roster: !document.getElementById('rosterGrid').hidden,
+      lists: document.querySelectorAll('.roster-list').length,
+      reason: document.querySelector('.roster-input').value,
+    };`), { roster: true, lists: 4, reason: '' });
+    await chooseSetting('startPageSetting', 'leave');
+    await cdp.send('Page.reload');
+    await cdp.waitFor("document.querySelectorAll('.card').length > 0");
+    equal('也可保存请假登记为启动页面', await cdp.eval(`return {
+      rosterHidden: document.getElementById('rosterGrid').hidden,
+      current: document.querySelector('[aria-current="page"]').dataset.page,
+      importHidden: document.getElementById('importBtn').hidden,
+    };`), { rosterHidden: true, current: 'leave', importHidden: false });
+    await cdp.eval(`
+      const key = 'class-leave-register.settings';
+      const saved = JSON.parse(localStorage.getItem(key));
+      saved.startPage = 'invalid'; saved.rosterColumnCount = 9;
+      localStorage.setItem(key, JSON.stringify(saved)); return true;
+    `);
+    await cdp.send('Page.reload');
+    await cdp.waitFor("document.querySelectorAll('.card').length > 0");
+    equal('无效设置安全回退到默认页面与列数', await cdp.eval(`
+      document.querySelector('[data-open-settings]').click();
+      return [document.getElementById('startPageSetting').value, document.getElementById('rosterColumnSetting').value];
+    `), ['leave', '2']);
+    await cdp.screenshot(path.join(SHOT_DIR, '08-设置-启动页面与列数.png'));
   } finally {
     if (cdp) {
       try {
