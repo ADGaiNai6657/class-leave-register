@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>班级请假登记</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
@@ -10,7 +11,11 @@
   <body>
     <header class="topbar">
       <div class="topbar-start">
-        <button type="button" class="icon-btn" id="menuBtn" aria-label="切换功能" aria-controls="pageDrawer" aria-expanded="false">☰</button>
+        <button type="button" class="icon-btn" id="menuBtn" aria-label="切换功能" aria-controls="pageDrawer" aria-expanded="false">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <path d="M3.25 6.25h13.5M3.25 10h13.5M3.25 13.75h13.5" />
+          </svg>
+        </button>
         <div class="brand">
           <h1 id="pageTitle">班级请假登记</h1>
           <p class="roster-info" id="rosterInfo">正在读取花名册……</p>
@@ -29,17 +34,50 @@
         <button type="button" class="btn primary" id="exportBtn">导出</button>
       </div>
     </header>
+
     <div class="app-layout">
       <nav id="pageDrawer" class="page-drawer" aria-label="功能切换" hidden>
-        <button type="button" class="btn primary" data-page="leave" aria-current="page">班级请假登记</button>
-        <button type="button" class="btn" data-page="roster">花名册</button>
+        <button type="button" class="btn primary" data-page="leave" aria-current="page">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <rect x="3.25" y="4.75" width="13.5" height="12" rx="2.5" />
+            <path d="M3.25 8.75h13.5M6.9 3.25v2.5M13.1 3.25v2.5" />
+          </svg>
+          <span class="nav-label">班级请假登记</span>
+        </button>
+        <button type="button" class="btn" data-page="roster">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <path d="M4 5.75h12M4 10h12M4 14.25h7.5" />
+          </svg>
+          <span class="nav-label">花名册</span>
+        </button>
       </nav>
 
       <div class="workspace">
         <div class="banner-area" id="bannerArea"></div>
 
         <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
-        <main id="rosterGrid" class="roster-grid" aria-label="花名册" hidden></main>
+
+        <main id="rosterGrid" class="roster-page" aria-label="花名册" hidden>
+          <div class="roster-toolbar">
+            <div class="roster-summary">
+              <span class="roster-total"><strong id="rosterTotal">0</strong> 名学生</span>
+              <span class="roster-divider" aria-hidden="true"></span>
+              <span class="roster-stat" id="rosterFilledStat">已填 0 条</span>
+            </div>
+            <div class="roster-headers">
+              <span class="roster-headers-caption" id="headersCaption">导出列名</span>
+              <label class="roster-field">
+                <span class="roster-field-label">文字</span>
+                <input type="text" data-header="text" maxlength="100" placeholder="留空" aria-label="文字列标题" />
+              </label>
+              <label class="roster-field">
+                <span class="roster-field-label">选项</span>
+                <input type="text" data-header="choice" maxlength="100" placeholder="留空" aria-label="选项列标题" />
+              </label>
+            </div>
+          </div>
+          <div class="roster-columns" id="rosterColumns"></div>
+        </main>
 
         <footer class="statusbar">
           <span>双击卡片填写请假信息，再次双击可收起</span>
@@ -52,7 +90,11 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
         <div class="modal-head">
           <h2 id="modalTitle">导出登记结果</h2>
-          <button type="button" class="icon-btn" id="modalClose" aria-label="关闭">✕</button>
+          <button type="button" class="icon-btn" id="modalClose" aria-label="关闭">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M6 6l8 8M14 6l-8 8" />
+            </svg>
+          </button>
         </div>
         <p class="modal-summary" id="modalSummary"></p>
         <label class="export-scope">
@@ -81,15 +123,23 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="importTitle">
         <div class="modal-head">
           <h2 id="importTitle">读取 CSV 登记数据</h2>
-          <button type="button" class="icon-btn" id="importClose" aria-label="关闭">✕</button>
+          <button type="button" class="icon-btn" id="importClose" aria-label="关闭">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <path d="M6 6l8 8M14 6l-8 8" />
+            </svg>
+          </button>
         </div>
         <p class="modal-summary">
           可以读取本应用导出的「请假登记-*.csv」，也支持表头为「姓名 / 请假理由 / 是否补假」的 CSV。
         </p>
         <div class="dropzone" id="dropZone" tabindex="0" role="button" aria-label="拖拽 CSV 到此处，或点击选择文件">
-          <div class="dropzone-icon" aria-hidden="true">⇩</div>
-          <div class="dropzone-title">把 CSV 文件拖到这里</div>
-          <div class="dropzone-desc">或点击此处选择文件（默认打开 CSV 的导出目录）</div>
+          <span class="dropzone-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 4.5v9.5m0 0 3.75-3.75M12 14l-3.75-3.75M5 17.5h14" />
+            </svg>
+          </span>
+          <span class="dropzone-title">把 CSV 文件拖到这里</span>
+          <span class="dropzone-desc">或点击此处选择文件（默认打开 CSV 的导出目录）</span>
         </div>
         <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
         <div class="modal-status" id="importStatus" role="status" aria-live="polite"></div>

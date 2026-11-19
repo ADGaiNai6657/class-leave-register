@@ -480,7 +480,7 @@ async function main() {
       {
         visible: true,
         summary:
-          `共 ${total} 名学生，已填写 2 名。导出只保留这 2 名请假的学生的信息。首行标题：${state.exportTitle}。CSV 保存到：${EXPORT_DIR}。`,
+          `共 ${total} 名学生，已填写 2 名，本次导出 2 名。首行标题：${state.exportTitle}。CSV 保存到：${EXPORT_DIR}。`,
         options: [true, true],
       }
     );
@@ -655,7 +655,7 @@ async function main() {
     await sleep(120);
     check(
       '无人填写时弹窗给出提示',
-      await cdp.eval(`return document.getElementById('modalSummary').textContent.includes('目前还没有人填写请假信息');`),
+      await cdp.eval(`return document.getElementById('modalSummary').textContent.includes('当前范围内没有记录');`),
       await cdp.eval(`return document.getElementById('modalSummary').textContent;`)
     );
 

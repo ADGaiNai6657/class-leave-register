@@ -80,9 +80,14 @@
   }
 
   const rosterGrid = document.getElementById('rosterGrid');
+  const rosterColumns = document.getElementById('rosterColumns');
+  const rosterTotal = document.getElementById('rosterTotal');
+  const rosterFilledStat = document.getElementById('rosterFilledStat');
+  const headerInputs = [...rosterGrid.querySelectorAll('[data-header]')];
   const includeUnfilled = document.getElementById('includeUnfilled');
   const menuBtn = document.getElementById('menuBtn');
   const pageDrawer = document.getElementById('pageDrawer');
+  const workspace = document.querySelector('.workspace');
   const rosterForm = { headers: { text: '', choice: '' }, records: [] };
   let activePage = 'leave';
 
@@ -93,67 +98,134 @@
     renderRosterForm();
   }
 
+  function rosterFilledCount() {
+    return rosterForm.records.filter(
+      (record) => String(record.reason || '').trim() !== '' || record.makeup !== null
+    ).length;
+  }
+
+  function updateRosterSummary() {
+    const total = rosterForm.records.length;
+    const filled = rosterFilledCount();
+    rosterTotal.textContent = String(total);
+    rosterFilledStat.textContent = `已填 ${filled} 条`;
+    rosterFilledStat.classList.toggle('filled', filled > 0);
+  }
+
+  function syncRosterRecord(row, record, choiceButtons) {
+    const filled = String(record.reason || '').trim() !== '' || record.makeup !== null;
+    row.classList.toggle('is-filled', filled);
+    for (const [value, button] of choiceButtons) {
+      button.setAttribute('aria-pressed', String(record.makeup === value));
+    }
+  }
+
+  /** 一行学生：姓名、请假理由输入框、是/否补假 */
+  function createRosterRecord(record) {
+    const row = document.createElement('div');
+    row.className = 'roster-record';
+
+    const name = document.createElement('span');
+    name.className = 'roster-name';
+    name.title = record.name;
+
+    const avatar = document.createElement('span');
+    avatar.className = 'roster-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    avatar.textContent = Array.from(record.name)[0] || '·';
+
+    const nameText = document.createElement('span');
+    nameText.className = 'roster-name-text';
+    nameText.textContent = record.name;
+    name.append(avatar, nameText);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'roster-input';
+    input.maxLength = 20000;
+    input.value = record.reason;
+    input.placeholder = '请假理由';
+    input.setAttribute('aria-label', `${record.name}的请假理由`);
+
+    const choices = document.createElement('div');
+    choices.className = 'choice-switch';
+    choices.setAttribute('role', 'group');
+    choices.setAttribute('aria-label', `${record.name}的补假选项：是或否`);
+
+    const choiceField = document.createElement('div');
+    choiceField.className = 'choice-field';
+    const choiceLabel = document.createElement('span');
+    choiceLabel.className = 'choice-label';
+    choiceLabel.setAttribute('aria-hidden', 'true');
+    choiceLabel.textContent = '补假';
+    choiceField.append(choiceLabel, choices);
+
+    const choiceButtons = [];
+    for (const [value, label] of [[true, '是'], [false, '否']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'choice-btn';
+      button.textContent = label;
+      button.setAttribute('aria-pressed', String(record.makeup === value));
+      button.addEventListener('click', () => {
+        record.makeup = record.makeup === value ? null : value;
+        syncRosterRecord(row, record, choiceButtons);
+        updateRosterSummary();
+      });
+      choiceButtons.push([value, button]);
+      choices.append(button);
+    }
+
+    input.addEventListener('input', () => {
+      record.reason = input.value;
+      syncRosterRecord(row, record, choiceButtons);
+      updateRosterSummary();
+    });
+
+    row.append(name, input, choiceField);
+    syncRosterRecord(row, record, choiceButtons);
+    return row;
+  }
+
+  function createRosterList(records) {
+    const list = document.createElement('section');
+    list.className = 'roster-list';
+
+    const head = document.createElement('div');
+    head.className = 'roster-list-head';
+    for (const label of ['姓名', '请假理由', '补假']) {
+      const cell = document.createElement('span');
+      cell.textContent = label;
+      head.append(cell);
+    }
+    list.append(head);
+
+    for (const record of records) list.append(createRosterRecord(record));
+    return list;
+  }
+
   function renderRosterForm() {
     const records = rosterForm.records;
-    const split = Math.ceil(records.length / 2);
-    rosterGrid.replaceChildren();
-    for (const group of [records.slice(0, split), records.slice(split)]) {
-      const column = document.createElement('section');
-      column.className = 'roster-column';
-      const header = document.createElement('div');
-      header.className = 'roster-row roster-header';
-      const nameHeading = document.createElement('strong');
-      nameHeading.textContent = '姓名';
-      header.append(nameHeading);
-      for (const [key, label] of [['text', '文字列标题'], ['choice', '选项列标题']]) {
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.dataset.header = key;
-        input.placeholder = label;
-        input.setAttribute('aria-label', label);
-        input.maxLength = 100;
-        input.value = rosterForm.headers[key];
-        input.addEventListener('input', () => {
-          rosterForm.headers[key] = input.value;
-          for (const peer of rosterGrid.querySelectorAll(`[data-header="${key}"]`)) {
-            if (peer !== input) peer.value = input.value;
-          }
-        });
-        header.append(input);
-      }
-      column.append(header);
-      for (const record of group) {
-        const row = document.createElement('div');
-        row.className = 'roster-row';
-        const name = document.createElement('span');
-        name.textContent = record.name;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.maxLength = 20000;
-        input.value = record.reason;
-        input.setAttribute('aria-label', `${record.name}的文字记录`);
-        input.addEventListener('input', () => { record.reason = input.value; });
-        const choices = document.createElement('div');
-        choices.className = 'segmented roster-choices';
-        choices.setAttribute('role', 'group');
-        choices.setAttribute('aria-label', `${record.name}的是或否选项`);
-        for (const [value, label] of [[true, '是'], [false, '否']]) {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.textContent = label;
-          button.setAttribute('aria-pressed', String(record.makeup === value));
-          button.addEventListener('click', () => {
-            record.makeup = record.makeup === value ? null : value;
-            choices.children[0].setAttribute('aria-pressed', String(record.makeup === true));
-            choices.children[1].setAttribute('aria-pressed', String(record.makeup === false));
-          });
-          choices.append(button);
-        }
-        row.append(name, input, choices);
-        column.append(row);
-      }
-      rosterGrid.append(column);
+    rosterColumns.replaceChildren();
+
+    if (records.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'roster-empty';
+      empty.textContent = '花名册中没有学生。';
+      rosterColumns.append(empty);
+    } else {
+      const split = Math.ceil(records.length / 2);
+      rosterColumns.append(createRosterList(records.slice(0, split)), createRosterList(records.slice(split)));
     }
+
+    for (const input of headerInputs) input.value = rosterForm.headers[input.dataset.header] || '';
+    updateRosterSummary();
+  }
+
+  for (const input of headerInputs) {
+    input.addEventListener('input', () => {
+      rosterForm.headers[input.dataset.header] = input.value;
+    });
   }
 
   function setDrawer(open) {
@@ -173,7 +245,9 @@
     if (!button) return;
     activePage = button.dataset.page;
     const isRoster = activePage === 'roster';
-    document.getElementById('pageTitle').textContent = button.textContent;
+    const label = button.querySelector('.nav-label');
+    document.getElementById('pageTitle').textContent = label ? label.textContent : button.textContent;
+    workspace.scrollTop = 0;
     els.grid.hidden = isRoster;
     rosterGrid.hidden = !isRoster;
     els.sizeGroup.parentElement.hidden = isRoster;
@@ -209,6 +283,7 @@
     const r = state.roster;
     const columnNote = r.nameColumn.source === 'inferred' ? `，姓名列：${r.nameColumn.label}（自动识别）` : '';
     els.rosterInfo.textContent = `${r.fileName} · ${r.format} · 工作表「${r.sheetName}」 · ${r.studentCount} 名学生${columnNote}`;
+    els.rosterInfo.title = els.rosterInfo.textContent;
   }
 
   function renderBanners() {
