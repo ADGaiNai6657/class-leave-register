@@ -83,7 +83,6 @@
   const includeUnfilled = document.getElementById('includeUnfilled');
   const menuBtn = document.getElementById('menuBtn');
   const pageDrawer = document.getElementById('pageDrawer');
-  const drawerShade = document.getElementById('drawerShade');
   const rosterForm = { headers: { text: '', choice: '' }, records: [] };
   let activePage = 'leave';
 
@@ -159,14 +158,12 @@
 
   function setDrawer(open) {
     pageDrawer.hidden = !open;
-    drawerShade.hidden = !open;
     menuBtn.setAttribute('aria-expanded', String(open));
   }
 
   menuBtn.addEventListener('click', () => setDrawer(pageDrawer.hidden));
-  drawerShade.addEventListener('click', () => setDrawer(false));
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !pageDrawer.hidden) {
+    if (event.key === 'Escape' && !pageDrawer.hidden && els.modalBackdrop.hidden && els.importBackdrop.hidden) {
       setDrawer(false);
       menuBtn.focus();
     }
@@ -187,8 +184,6 @@
       if (item === button) item.setAttribute('aria-current', 'page');
       else item.removeAttribute('aria-current');
     }
-    setDrawer(false);
-    menuBtn.focus();
   });
 
   function exportRecords() {

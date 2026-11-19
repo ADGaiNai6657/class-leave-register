@@ -29,21 +29,24 @@
         <button type="button" class="btn primary" id="exportBtn">导出</button>
       </div>
     </header>
-    <div id="drawerShade" class="drawer-shade" hidden></div>
-    <nav id="pageDrawer" class="page-drawer" aria-label="功能切换" hidden>
-      <button type="button" class="btn primary" data-page="leave" aria-current="page">班级请假登记</button>
-      <button type="button" class="btn" data-page="roster">花名册</button>
-    </nav>
+    <div class="app-layout">
+      <nav id="pageDrawer" class="page-drawer" aria-label="功能切换" hidden>
+        <button type="button" class="btn primary" data-page="leave" aria-current="page">班级请假登记</button>
+        <button type="button" class="btn" data-page="roster">花名册</button>
+      </nav>
 
-    <div class="banner-area" id="bannerArea"></div>
+      <div class="workspace">
+        <div class="banner-area" id="bannerArea"></div>
 
-    <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
-    <main id="rosterGrid" class="roster-grid" aria-label="花名册" hidden></main>
+        <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
+        <main id="rosterGrid" class="roster-grid" aria-label="花名册" hidden></main>
 
-    <footer class="statusbar">
-      <span>双击卡片填写请假信息，再次双击可收起</span>
-      <span id="statLine">已填写 0 / 0</span>
-    </footer>
+        <footer class="statusbar">
+          <span>双击卡片填写请假信息，再次双击可收起</span>
+          <span id="statLine">已填写 0 / 0</span>
+        </footer>
+      </div>
+    </div>
 
     <div class="modal-backdrop" id="modalBackdrop" hidden>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">

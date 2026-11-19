@@ -54,6 +54,7 @@ body {
   top: 0;
   z-index: 20;
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -84,24 +85,36 @@ body {
   cursor: pointer;
 }
 
-.drawer-shade {
-  position: fixed;
-  inset: 0;
-  z-index: 18;
-  background: rgba(29, 33, 41, 0.28);
+.app-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: auto;
+  container-type: inline-size;
 }
 
 .page-drawer {
-  position: fixed;
-  inset: 0 auto 0 0;
-  z-index: 19;
-  width: min(260px, 85vw);
-  padding: 145px 16px 16px;
+  flex: 0 0 min(240px, 30vw);
+  min-width: 0;
+  padding: 12px clamp(6px, 2vw, 16px);
+  overflow: auto;
   background: var(--panel);
-  box-shadow: var(--shadow-lift);
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.page-drawer .btn {
+  overflow-wrap: anywhere;
+  text-align: start;
 }
 
 .roster-grid {
@@ -157,9 +170,26 @@ body {
   color: white;
 }
 
-@media (max-width: 680px) {
+@container (max-width: 680px) {
   .roster-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 380px) {
+  .roster-grid {
+    padding-inline: 8px;
+  }
+
+  .roster-row {
+    grid-template-columns: minmax(2.5rem, 1fr) minmax(0, 2fr) 4rem;
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .roster-choices button {
+    min-width: 0;
+    padding-inline: 0;
   }
 }
 
@@ -373,7 +403,7 @@ body {
 .grid {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--card-min), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--card-min)), 1fr));
   grid-auto-rows: min-content;
   align-items: start;
   gap: var(--gap);
@@ -437,6 +467,18 @@ body {
 .grid[data-size="small"] .card.expanded,
 .grid[data-size="medium"] .card.expanded {
   grid-column: span 2;
+}
+
+@container (width < 396px) {
+  .grid[data-size="medium"] .card.expanded {
+    grid-column: auto;
+  }
+}
+
+@container (width < 306px) {
+  .grid[data-size="small"] .card.expanded {
+    grid-column: auto;
+  }
 }
 
 .card-head {
