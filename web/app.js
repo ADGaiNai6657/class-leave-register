@@ -95,11 +95,11 @@
   const settingsStatus = document.getElementById('settingsStatus');
   const settingsKey = 'class-leave-register.settings';
   const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
-  const settings = { theme: null, cardSize: 'medium', leaveScope: false, rosterScope: true };
+  const settings = { theme: 'system', cardSize: 'medium', leaveScope: false, rosterScope: true };
 
   try {
     const saved = JSON.parse(localStorage.getItem(settingsKey));
-    if (saved?.theme === 'light' || saved?.theme === 'dark') settings.theme = saved.theme;
+    if (['system', 'light', 'dark'].includes(saved?.theme)) settings.theme = saved.theme;
     if (['small', 'medium', 'large'].includes(saved?.cardSize)) settings.cardSize = saved.cardSize;
     if (typeof saved?.leaveScope === 'boolean') settings.leaveScope = saved.leaveScope;
     if (typeof saved?.rosterScope === 'boolean') settings.rosterScope = saved.rosterScope;
@@ -108,9 +108,9 @@
   }
 
   function applyTheme() {
-    const theme = settings.theme || (systemTheme.matches ? 'dark' : 'light');
+    const theme = settings.theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : settings.theme;
     document.documentElement.dataset.theme = theme;
-    themeSetting.value = theme;
+    themeSetting.value = settings.theme;
   }
 
   function saveSettings() {
@@ -287,13 +287,16 @@
   }
 
   function setDrawer(open) {
-    pageDrawer.hidden = !open;
+    if (!open && pageDrawer.contains(document.activeElement)) menuBtn.focus();
+    pageDrawer.inert = !open;
+    pageDrawer.setAttribute('aria-hidden', String(!open));
+    pageDrawer.classList.toggle('is-open', open);
     menuBtn.setAttribute('aria-expanded', String(open));
   }
 
-  menuBtn.addEventListener('click', () => setDrawer(pageDrawer.hidden));
+  menuBtn.addEventListener('click', () => setDrawer(menuBtn.getAttribute('aria-expanded') !== 'true'));
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !settingsDialog.open && !pageDrawer.hidden && els.modalBackdrop.hidden && els.importBackdrop.hidden) {
+    if (event.key === 'Escape' && !settingsDialog.open && menuBtn.getAttribute('aria-expanded') === 'true' && els.modalBackdrop.hidden && els.importBackdrop.hidden) {
       setDrawer(false);
       menuBtn.focus();
     }

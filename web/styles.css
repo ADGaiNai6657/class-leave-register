@@ -71,6 +71,9 @@
   /* 尺寸 */
   --tap: 44px;                          /* HIG 建议的最小可点尺寸 */
   --topbar-h: 64px;
+  --drawer-width: 232px;
+  --drawer-duration: 0.15s;
+  --drawer-easing: ease;
 }
 
 :root[data-theme="light"] { color-scheme: light; }
@@ -437,6 +440,7 @@ select {
   display: flex;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .workspace {
@@ -449,7 +453,12 @@ select {
 }
 
 .page-drawer {
-  flex: 0 0 232px;
+  flex: 0 0 var(--drawer-width);
+  min-width: 0;
+  margin-left: calc(-1 * var(--drawer-width));
+  visibility: hidden;
+  transition: margin-left var(--drawer-duration) var(--drawer-easing),
+    visibility 0s linear var(--drawer-duration);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -457,6 +466,12 @@ select {
   overflow: auto;
   background: var(--surface);
   border-right: 1px solid var(--separator);
+}
+
+.page-drawer.is-open {
+  margin-left: 0;
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .page-drawer .btn {
@@ -1491,14 +1506,18 @@ select {
     gap: 8px;
   }
 
-  .page-drawer {
-    flex-basis: min(232px, 42vw);
+  :root {
+    --drawer-width: min(232px, 42vw);
   }
 }
 
 /* ---------------------------------------------------------------- 无障碍偏好 */
 
 @media (prefers-reduced-motion: reduce) {
+  .page-drawer {
+    transition: none;
+  }
+
   *,
   *::before,
   *::after {

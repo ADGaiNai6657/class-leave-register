@@ -5,7 +5,7 @@
  *
  * 覆盖：卡片渲染、卡片大小、双击展开、填写/修改、补假单选、编辑状态、
  *       剪切板写入（跨平台回读校验）、CSV 落盘与转义、重复导出、弹窗行为、
- *       无外部网络请求、无本地持久化。
+ *       无外部网络请求、填写内容不持久化、外观设置、侧边栏过渡。
  *
  * 运行：npm run test:e2e
  */
@@ -631,9 +631,13 @@ async function main() {
       requests.filter((u) => !u.startsWith(baseUrl) && !u.startsWith('data:'))
     );
     equal(
-      '没有写入任何本地持久化数据（localStorage / cookie 为空）',
-      await cdp.eval(`return { local: Object.keys(localStorage).length, session: Object.keys(sessionStorage).length, cookie: document.cookie };`),
-      { local: 0, session: 0, cookie: '' }
+      '仅持久化界面设置，不保存学生或填写内容',
+      await cdp.eval(`return {
+        local: Object.keys(localStorage),
+        settingKeys: Object.keys(JSON.parse(localStorage.getItem('class-leave-register.settings'))).sort(),
+        session: Object.keys(sessionStorage).length, cookie: document.cookie,
+      };`),
+      { local: ['class-leave-register.settings'], settingKeys: ['cardSize', 'leaveScope', 'rosterScope', 'theme'], session: 0, cookie: '' }
     );
 
     const pageErrors = cdp.events
@@ -729,6 +733,102 @@ async function main() {
 
     await cdp.eval(`document.getElementById('importClose').click(); return true;`);
     equal('关闭导入弹窗', await cdp.eval(`return document.getElementById('importBackdrop').hidden;`), true);
+
+    // ---------------------------------------------------------- 外观与侧边栏
+    const setMedia = (scheme, motion = 'no-preference') => cdp.send('Emulation.setEmulatedMedia', {
+      features: [
+        { name: 'prefers-color-scheme', value: scheme },
+        { name: 'prefers-reduced-motion', value: motion },
+      ],
+    });
+    const chooseTheme = (theme) => cdp.eval(`
+      document.querySelector('[data-open-settings]').click();
+      const select = document.getElementById('themeSetting');
+      select.value = ${JSON.stringify(theme)};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      document.getElementById('settingsDialog').close();
+      return select.value;
+    `);
+    await chooseTheme('system');
+    for (const scheme of ['dark', 'light']) {
+      await setMedia(scheme);
+      await cdp.waitFor(`document.documentElement.dataset.theme === '${scheme}'`);
+      equal(`跟随系统切换为${scheme}且保留选项`, await cdp.eval(`return document.getElementById('themeSetting').value;`), 'system');
+    }
+    for (const [manual, system] of [['light', 'dark'], ['dark', 'light']]) {
+      await chooseTheme(manual);
+      await setMedia(system);
+      await sleep(80);
+      equal(`手动${manual}不受系统${system}影响`, await cdp.eval(`return document.documentElement.dataset.theme;`), manual);
+    }
+    await chooseTheme('system');
+    await cdp.send('Page.reload');
+    await cdp.waitFor("document.querySelectorAll('.card').length > 0");
+    equal('刷新后保留跟随系统设置', await cdp.eval(`return {
+      selected: document.getElementById('themeSetting').value,
+      saved: JSON.parse(localStorage.getItem('class-leave-register.settings')).theme,
+      actual: document.documentElement.dataset.theme,
+    };`), { selected: 'system', saved: 'system', actual: 'light' });
+
+    for (const width of [1500, 720, 320]) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', {
+        width, height: 1000, deviceScaleFactor: 1, mobile: false,
+      });
+      for (const open of [true, false]) {
+        const movement = await cdp.eval(`
+          return (async () => {
+            const drawer = document.getElementById('pageDrawer');
+            const workspace = document.querySelector('.workspace');
+            const start = workspace.getBoundingClientRect().left;
+            document.getElementById('menuBtn').click();
+            const animations = drawer.getAnimations();
+            for (const animation of animations) {
+              animation.pause();
+              animation.currentTime = 75;
+            }
+            const middle = workspace.getBoundingClientRect().left;
+            for (const animation of animations) animation.finish();
+            await Promise.all(animations.map((animation) => animation.finished));
+            return {
+              start, middle, end: workspace.getBoundingClientRect().left,
+              animated: animations.some((animation) => animation.transitionProperty === 'margin-left'),
+              inert: drawer.inert, expanded: document.getElementById('menuBtn').getAttribute('aria-expanded'),
+              hidden: drawer.getAttribute('aria-hidden'),
+              visibility: getComputedStyle(drawer).visibility,
+              overflow: document.documentElement.scrollWidth > innerWidth,
+            };
+          })();
+        `);
+        check(`${width}px 侧边栏${open ? '展开' : '收起'}时主内容连续移动`,
+          movement.animated && movement.middle > Math.min(movement.start, movement.end)
+            && movement.middle < Math.max(movement.start, movement.end), movement);
+        check(`${width}px 侧边栏状态及页面宽度正确`,
+          movement.inert === !open && movement.expanded === String(open)
+            && movement.hidden === String(!open) && movement.visibility === (open ? 'visible' : 'hidden')
+            && !movement.overflow, movement);
+      }
+    }
+    await setMedia('dark', 'reduce');
+    equal('减少动态效果时即时展开侧边栏', await cdp.eval(`
+      document.getElementById('menuBtn').click();
+      const drawer = document.getElementById('pageDrawer');
+      drawer.querySelector('button').focus();
+      return { animations: drawer.getAnimations().length, left: document.querySelector('.workspace').getBoundingClientRect().left > 0 };
+    `), { animations: 0, left: true });
+    await cdp.screenshot(path.join(SHOT_DIR, '05-侧边栏-窄屏-深色.png'));
+    await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    equal('Escape 收起侧边栏并将焦点还给菜单', await cdp.eval(`return {
+      expanded: document.getElementById('menuBtn').getAttribute('aria-expanded'),
+      focused: document.activeElement.id,
+      inert: document.getElementById('pageDrawer').inert,
+    };`), { expanded: 'false', focused: 'menuBtn', inert: true });
+    await setMedia('light');
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: 1500, height: 1000, deviceScaleFactor: 1, mobile: false,
+    });
+    await cdp.eval(`document.querySelector('[data-open-settings]').click(); return true;`);
+    await cdp.waitFor("document.documentElement.dataset.theme === 'light'");
+    await cdp.screenshot(path.join(SHOT_DIR, '06-设置-跟随系统.png'));
   } finally {
     if (cdp) {
       try {
