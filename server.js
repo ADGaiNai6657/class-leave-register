@@ -272,7 +272,7 @@ function createServer(context) {
       if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
         return serveStatic(res, 'index.html');
       }
-      if (req.method === 'GET' && /^\/(styles\.css|app\.js|favicon\.svg)$/.test(pathname)) {
+      if (req.method === 'GET' && /^\/(styles\.css|app\.js|name-search\.js|vendor\/pinyin-pro\/pinyin-pro\.js|favicon\.svg)$/.test(pathname)) {
         return serveStatic(res, pathname.slice(1));
       }
 

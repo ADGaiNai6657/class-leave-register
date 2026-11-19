@@ -18,6 +18,26 @@ const { readXlsx } = require('../lib/xlsx');
 const { decodeText, parseDelimited, sniffDelimiter, readDelimited, readJson } = require('../lib/delimited');
 const { isNameLike, loadRoster, resolveRoster, RosterError, discoverRosterFiles, defaultSearchDirs, rosterDisplayName } = require('../lib/roster');
 const { parseLeaveCsv, matchRecords } = require('../lib/import');
+const { matches: matchesName } = require('../web/name-search');
+
+test('姓名搜索：全名、姓名开头汉字、首字母和大小写', () => {
+  for (const query of ['张三', '张', 'zs', 'z', 'ZS', ' ＺＳ ']) {
+    assert.equal(matchesName('张三', query), true, query);
+  }
+  for (const query of ['三', 'ls', 's', 'zhangsan', '<script>']) {
+    assert.equal(matchesName('张三', query), false, query);
+  }
+  assert.equal(matchesName('张三丰', '张三'), true);
+  assert.equal(matchesName('张三', '张三丰'), false);
+  assert.equal(matchesName('张三', '   '), true);
+});
+
+test('姓名搜索：多音姓氏、复姓、元音首字母及重名', () => {
+  for (const [name, query] of [['单明', 'sm'], ['曾明', 'zm'], ['区明', 'om'], ['欧阳安', 'oya'], ['王安', 'wa']]) {
+    assert.equal(matchesName(name, query), true, name);
+  }
+  assert.equal(['张三', '李四', '张三'].filter((name) => matchesName(name, 'zs')).length, 2);
+});
 const {
   csvEscape,
   buildCsv,

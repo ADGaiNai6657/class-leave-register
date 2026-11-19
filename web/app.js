@@ -87,6 +87,9 @@
   const includeUnfilled = document.getElementById('includeUnfilled');
   const menuBtn = document.getElementById('menuBtn');
   const pageDrawer = document.getElementById('pageDrawer');
+  const nameSearchInput = document.getElementById('nameSearch');
+  const clearSearch = document.getElementById('clearSearch');
+  const searchStatus = document.getElementById('searchStatus');
   const settingsDialog = document.getElementById('settingsDialog');
   const themeSetting = document.getElementById('themeSetting');
   const cardSizeSetting = document.getElementById('cardSizeSetting');
@@ -148,6 +151,43 @@
   const workspace = document.querySelector('.workspace');
   const rosterForm = { headers: { text: '', choice: '' }, records: [] };
   let activePage = 'leave';
+
+  function matchesSearch(name) {
+    return window.nameSearch.matches(name, nameSearchInput.value);
+  }
+
+  function updateSearchStatus() {
+    const records = activePage === 'roster' ? rosterForm.records : state.students;
+    const count = records.filter((record) => matchesSearch(record.name)).length;
+    const searching = nameSearchInput.value.trim() !== '';
+    clearSearch.hidden = nameSearchInput.value === '';
+    searchStatus.hidden = !searching;
+    searchStatus.textContent = searching
+      ? (count ? `找到 ${count} / ${records.length} 名学生` : '没有匹配的学生，请尝试其他姓名或首字母。') : '';
+  }
+
+  function filterCards() {
+    for (const card of els.grid.querySelectorAll('.card')) {
+      card.hidden = !matchesSearch(state.students[Number(card.dataset.index)].name);
+    }
+    updateSearchStatus();
+  }
+
+  function applySearch() {
+    filterCards();
+    renderRosterForm();
+    workspace.scrollTop = 0;
+  }
+
+  nameSearchInput.addEventListener('input', (event) => {
+    if (!event.isComposing) applySearch();
+  });
+  nameSearchInput.addEventListener('compositionend', applySearch);
+  clearSearch.addEventListener('click', () => {
+    nameSearchInput.value = '';
+    applySearch();
+    nameSearchInput.focus();
+  });
 
   // 名单来源和填写数据分开，后续可将 CSV 解析后的同形数据传入这里。
   function applyRosterForm({ records, headers = { text: '', choice: '' } }) {
@@ -263,13 +303,13 @@
   }
 
   function renderRosterForm() {
-    const records = rosterForm.records;
+    const records = rosterForm.records.filter((record) => matchesSearch(record.name));
     rosterColumns.replaceChildren();
 
     if (records.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'roster-empty';
-      empty.textContent = '花名册中没有学生。';
+      empty.textContent = rosterForm.records.length ? '没有匹配的学生。' : '花名册中没有学生。';
       rosterColumns.append(empty);
     } else {
       const split = Math.ceil(records.length / 2);
@@ -278,6 +318,7 @@
 
     for (const input of headerInputs) input.value = rosterForm.headers[input.dataset.header] || '';
     updateRosterSummary();
+    updateSearchStatus();
   }
 
   for (const input of headerInputs) {
@@ -305,6 +346,7 @@
     const button = event.target.closest('[data-page]');
     if (!button) return;
     activePage = button.dataset.page;
+    updateSearchStatus();
     const isRoster = activePage === 'roster';
     const label = button.querySelector('.nav-label');
     document.getElementById('pageTitle').textContent = label ? label.textContent : button.textContent;
@@ -577,11 +619,13 @@
         : '花名册中没有学生。';
       els.grid.append(empty);
       updateStatLine();
+      updateSearchStatus();
       return;
     }
     const fragment = document.createDocumentFragment();
     state.students.forEach((student, index) => fragment.append(createCard(student, index)));
     els.grid.append(fragment);
+    filterCards();
     updateStatLine();
   }
 

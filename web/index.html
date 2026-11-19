@@ -21,6 +21,11 @@
           <p class="roster-info" id="rosterInfo">正在读取花名册……</p>
         </div>
       </div>
+      <div class="name-search" role="search" aria-label="学生姓名搜索">
+        <label class="control-label" for="nameSearch">搜索姓名</label>
+        <input id="nameSearch" type="search" placeholder="全名、首字或首字母" autocomplete="off" spellcheck="false" aria-controls="grid rosterColumns" aria-describedby="searchStatus" />
+        <button type="button" class="icon-btn" id="clearSearch" aria-label="清空搜索" title="清空搜索" hidden>×</button>
+      </div>
       <div class="controls">
         <div class="size-control">
           <span class="control-label" id="sizeLabel">卡片大小</span>
@@ -61,6 +66,7 @@
 
       <div class="workspace">
         <div class="banner-area" id="bannerArea"></div>
+        <p id="searchStatus" class="search-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
 
         <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
 
@@ -197,6 +203,8 @@
       </div>
     </div>
 
+    <script src="vendor/pinyin-pro/pinyin-pro.js"></script>
+    <script src="name-search.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

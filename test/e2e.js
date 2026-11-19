@@ -734,6 +734,60 @@ async function main() {
     await cdp.eval(`document.getElementById('importClose').click(); return true;`);
     equal('关闭导入弹窗', await cdp.eval(`return document.getElementById('importBackdrop').hidden;`), true);
 
+    // ---------------------------------------------------------- 姓名搜索
+    const searchFor = (query) => cdp.eval(`
+      const input = document.getElementById('nameSearch');
+      input.value = ${JSON.stringify(query)};
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return [...document.querySelectorAll('.card:not([hidden]) .card-name')].map((node) => node.textContent);
+    `);
+    equal('全名搜索显示所有同名学生', await searchFor(expectedNames[0]), expectedNames.filter((name) => name.startsWith(expectedNames[0])));
+    equal('首字搜索只匹配姓名开头', await searchFor(Array.from(expectedNames[0])[0]), expectedNames.filter((name) => name.startsWith(Array.from(expectedNames[0])[0])));
+    const initials = await cdp.eval(`return pinyinPro.pinyin(${JSON.stringify(expectedNames[0])}, {
+      pattern: 'first', toneType: 'none', type: 'array', surname: 'head',
+    }).join('');`);
+    const initialsResults = await searchFor(initials);
+    check('首字母搜索找到对应学生', initialsResults.includes(expectedNames[0]), initialsResults);
+    equal('首字母搜索不区分大小写', await searchFor(initials.toUpperCase()), initialsResults);
+    await searchFor('不存在的学生XYZ');
+    check('无结果时显示提示', await cdp.eval(`return !document.getElementById('searchStatus').hidden
+      && document.getElementById('searchStatus').textContent.includes('没有匹配')
+      && document.querySelectorAll('.card:not([hidden])').length === 0;`));
+    await cdp.eval(`document.getElementById('clearSearch').click(); return true;`);
+    equal('清空恢复所有卡片并返回搜索框焦点', await cdp.eval(`return {
+      count: document.querySelectorAll('.card:not([hidden])').length, focus: document.activeElement.id,
+      reason: document.querySelector('.card[data-index="0"] textarea').value,
+    };`), { count: total, focus: 'nameSearch', reason: '导入的理由' });
+    await searchFor(expectedNames[1]);
+    await cdp.eval(`document.getElementById('exportBtn').click(); return true;`);
+    check('搜索不缩小请假登记导出范围', await cdp.eval(`return document.getElementById('modalSummary').textContent.includes('本次导出 2 名');`));
+    await cdp.eval(`
+      document.getElementById('modalClose').click();
+      document.getElementById('menuBtn').click();
+      document.querySelector('[data-page="roster"]').click();
+      return true;
+    `);
+    equal('切换花名册保留查询并筛选', await cdp.eval(`return {
+      query: document.getElementById('nameSearch').value,
+      names: [...document.querySelectorAll('.roster-name-text')].map((node) => node.textContent),
+    };`), { query: expectedNames[1], names: expectedNames.filter((name) => name.startsWith(expectedNames[1])) });
+    await cdp.eval(`
+      const input = document.querySelector('.roster-input');
+      input.value = '搜索后填写'; input.dispatchEvent(new Event('input'));
+      return true;
+    `);
+    await searchFor('不存在的学生XYZ');
+    await searchFor(expectedNames[1]);
+    equal('花名册筛选后填写内容保留', await cdp.eval(`return document.querySelector('.roster-input').value;`), '搜索后填写');
+    await cdp.eval(`document.getElementById('clearSearch').click(); return true;`);
+    equal('花名册清空搜索恢复全部名单', await cdp.eval(`return document.querySelectorAll('.roster-record').length;`), total);
+    await cdp.eval(`
+      document.querySelector('[data-page="leave"]').click();
+      document.getElementById('menuBtn').click();
+      return true;
+    `);
+    await cdp.eval(`return Promise.all(document.getElementById('pageDrawer').getAnimations().map((a) => a.finished));`);
+
     // ---------------------------------------------------------- 外观与侧边栏
     const setMedia = (scheme, motion = 'no-preference') => cdp.send('Emulation.setEmulatedMedia', {
       features: [
