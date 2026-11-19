@@ -9,9 +9,12 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">
-        <h1>班级请假登记</h1>
-        <p class="roster-info" id="rosterInfo">正在读取花名册……</p>
+      <div class="topbar-start">
+        <button type="button" class="icon-btn" id="menuBtn" aria-label="切换功能" aria-controls="pageDrawer" aria-expanded="false">☰</button>
+        <div class="brand">
+          <h1 id="pageTitle">班级请假登记</h1>
+          <p class="roster-info" id="rosterInfo">正在读取花名册……</p>
+        </div>
       </div>
       <div class="controls">
         <div class="size-control">
@@ -26,10 +29,16 @@
         <button type="button" class="btn primary" id="exportBtn">导出</button>
       </div>
     </header>
+    <div id="drawerShade" class="drawer-shade" hidden></div>
+    <nav id="pageDrawer" class="page-drawer" aria-label="功能切换" hidden>
+      <button type="button" class="btn primary" data-page="leave" aria-current="page">班级请假登记</button>
+      <button type="button" class="btn" data-page="roster">花名册</button>
+    </nav>
 
     <div class="banner-area" id="bannerArea"></div>
 
     <main class="grid" id="grid" data-size="medium" aria-label="学生卡片列表"></main>
+    <main id="rosterGrid" class="roster-grid" aria-label="花名册" hidden></main>
 
     <footer class="statusbar">
       <span>双击卡片填写请假信息，再次双击可收起</span>
@@ -46,7 +55,7 @@
         <div class="modal-actions">
           <button type="button" class="btn option" id="copyBtn">
             <span class="option-title">复制到剪切板</span>
-            <span class="option-desc">Tab 分隔，可直接粘贴到聊天窗口或表格软件</span>
+            <span class="option-desc">按列对齐，可直接粘贴到聊天窗口</span>
           </button>
           <button type="button" class="btn option primary" id="copyCsvBtn">
             <span class="option-title">复制到剪切板，并输出 CSV</span>

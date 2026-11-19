@@ -309,38 +309,46 @@ function createServer(context) {
       }
 
       // 导出只保留“请假的人”（填了理由，或选了是否补假）
-      if (req.method === 'POST' && pathname === '/api/clipboard') {
+      if (req.method === 'POST' && (pathname === '/api/clipboard' || pathname === '/api/export')) {
         const body = parseJsonBody(await readBody(req));
         const all = normalizeRecords(body.records);
-        const records = selectLeaveRecords(all);
-        if (records.length === 0) {
-          return sendJson(res, 400, { ok: false, error: '目前没有任何学生填写请假信息，没有可复制的内容。' });
+        const rosterMode = body.mode === 'roster';
+        const records = rosterMode ? all : selectLeaveRecords(all);
+        const options = { title: resolveCurrentTitle().title, dir: exportDir || defaultExportDir() };
+        if (rosterMode) {
+          options.title = '花名册';
+          options.filePrefix = '花名册';
+          options.header = ['姓名', ...['text', 'choice'].map((key) => {
+            const value = body.headers?.[key];
+            return typeof value === 'string' ? value.trim().slice(0, 100) : '';
+          })];
         }
-        const clipboardText = buildClipboardText(records, { title: resolveCurrentTitle().title });
-        await writeClipboard(clipboardText);
-        return sendJson(res, 200, {
-          ok: true,
-          rowCount: records.length,
-          skipped: all.length - records.length,
-          message: `已复制 ${records.length} 行到剪切板（只包含已填写请假信息的学生）`,
-        });
-      }
+        const clipboardText = buildClipboardText(records, options);
+        if (pathname === '/api/clipboard') {
+          if (records.length === 0) {
+            const error = rosterMode ? '花名册没有学生数据。' : '目前没有任何学生填写请假信息，没有可复制的内容。';
+            return sendJson(res, 400, { ok: false, error });
+          }
+          await writeClipboard(clipboardText);
+          return sendJson(res, 200, {
+            ok: true,
+            rowCount: records.length,
+            skipped: all.length - records.length,
+            message: `已复制 ${records.length} 行到剪切板${rosterMode ? '' : '（只包含已填写请假信息的学生）'}`,
+          });
+        }
 
-      if (req.method === 'POST' && pathname === '/api/export') {
-        const body = parseJsonBody(await readBody(req));
-        const all = normalizeRecords(body.records);
-        const records = selectLeaveRecords(all);
-        const exportTitle = resolveCurrentTitle().title;
-        const clipboardText = buildClipboardText(records, { title: exportTitle });
-        const csv = writeCsv(records, { dir: exportDir || defaultExportDir(), title: exportTitle });
+        const csv = writeCsv(records, options);
         let clipboardWarning = null;
         try {
-          if (records.length === 0) throw new Error('目前没有任何学生填写请假信息');
+          if (records.length === 0) {
+            throw new Error(rosterMode ? '花名册没有学生数据' : '目前没有任何学生填写请假信息');
+          }
           await writeClipboard(clipboardText);
         } catch (err) {
           clipboardWarning = err.message;
         }
-        const scope = records.length === 0
+        const scope = rosterMode ? `包含 ${records.length} 名学生` : records.length === 0
           ? '没有学生填写请假信息，CSV 中只有标题和表头'
           : `只包含 ${records.length} 名已填写请假信息的学生`;
         return sendJson(res, 200, {

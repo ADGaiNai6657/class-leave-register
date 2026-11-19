@@ -86,6 +86,124 @@
       .map((s) => ({ name: s.name, reason: s.reason, makeup: s.makeup }));
   }
 
+  const rosterGrid = document.getElementById('rosterGrid');
+  const menuBtn = document.getElementById('menuBtn');
+  const pageDrawer = document.getElementById('pageDrawer');
+  const drawerShade = document.getElementById('drawerShade');
+  const rosterForm = { headers: { text: '', choice: '' }, records: [] };
+  let activePage = 'leave';
+
+  // 名单来源和填写数据分开，后续可将 CSV 解析后的同形数据传入这里。
+  function applyRosterForm({ records, headers = { text: '', choice: '' } }) {
+    rosterForm.records = records;
+    rosterForm.headers = headers;
+    renderRosterForm();
+  }
+
+  function renderRosterForm() {
+    const records = rosterForm.records;
+    const split = Math.ceil(records.length / 2);
+    rosterGrid.replaceChildren();
+    for (const group of [records.slice(0, split), records.slice(split)]) {
+      const column = document.createElement('section');
+      column.className = 'roster-column';
+      const header = document.createElement('div');
+      header.className = 'roster-row roster-header';
+      const nameHeading = document.createElement('strong');
+      nameHeading.textContent = '姓名';
+      header.append(nameHeading);
+      for (const [key, label] of [['text', '文字列标题'], ['choice', '选项列标题']]) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.dataset.header = key;
+        input.placeholder = label;
+        input.setAttribute('aria-label', label);
+        input.maxLength = 100;
+        input.value = rosterForm.headers[key];
+        input.addEventListener('input', () => {
+          rosterForm.headers[key] = input.value;
+          for (const peer of rosterGrid.querySelectorAll(`[data-header="${key}"]`)) {
+            if (peer !== input) peer.value = input.value;
+          }
+        });
+        header.append(input);
+      }
+      column.append(header);
+      for (const record of group) {
+        const row = document.createElement('div');
+        row.className = 'roster-row';
+        const name = document.createElement('span');
+        name.textContent = record.name;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.maxLength = 20000;
+        input.value = record.reason;
+        input.setAttribute('aria-label', `${record.name}的文字记录`);
+        input.addEventListener('input', () => { record.reason = input.value; });
+        const choices = document.createElement('div');
+        choices.className = 'segmented roster-choices';
+        choices.setAttribute('role', 'group');
+        choices.setAttribute('aria-label', `${record.name}的是或否选项`);
+        for (const [value, label] of [[true, '是'], [false, '否']]) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = label;
+          button.setAttribute('aria-pressed', String(record.makeup === value));
+          button.addEventListener('click', () => {
+            record.makeup = record.makeup === value ? null : value;
+            choices.children[0].setAttribute('aria-pressed', String(record.makeup === true));
+            choices.children[1].setAttribute('aria-pressed', String(record.makeup === false));
+          });
+          choices.append(button);
+        }
+        row.append(name, input, choices);
+        column.append(row);
+      }
+      rosterGrid.append(column);
+    }
+  }
+
+  function setDrawer(open) {
+    pageDrawer.hidden = !open;
+    drawerShade.hidden = !open;
+    menuBtn.setAttribute('aria-expanded', String(open));
+  }
+
+  menuBtn.addEventListener('click', () => setDrawer(pageDrawer.hidden));
+  drawerShade.addEventListener('click', () => setDrawer(false));
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !pageDrawer.hidden) {
+      setDrawer(false);
+      menuBtn.focus();
+    }
+  });
+  pageDrawer.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-page]');
+    if (!button) return;
+    activePage = button.dataset.page;
+    const isRoster = activePage === 'roster';
+    document.getElementById('pageTitle').textContent = button.textContent;
+    els.grid.hidden = isRoster;
+    rosterGrid.hidden = !isRoster;
+    els.sizeGroup.parentElement.hidden = isRoster;
+    els.importBtn.hidden = isRoster;
+    els.statLine.parentElement.hidden = isRoster;
+    for (const item of pageDrawer.querySelectorAll('[data-page]')) {
+      item.classList.toggle('primary', item === button);
+      if (item === button) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    }
+    setDrawer(false);
+    menuBtn.focus();
+  });
+
+  function exportPayload() {
+    if (activePage === 'roster') {
+      return { mode: 'roster', headers: rosterForm.headers, records: rosterForm.records };
+    }
+    return { records: payloadRecords() };
+  }
+
   // ---------------------------------------------------------------- 渲染
 
   function renderRosterInfo() {
@@ -351,6 +469,10 @@
     state.students = roster
       ? roster.students.map((s) => ({ name: s.name, id: s.id || '', reason: '', makeup: null, edited: false }))
       : [];
+    applyRosterForm({
+      records: state.students.map(({ name }) => ({ name, reason: '', makeup: null })),
+      headers: rosterForm.headers,
+    });
   }
 
   function applyState(data) {
@@ -394,7 +516,8 @@
   // ---------------------------------------------------------------- 导出
 
   function openModal() {
-    if (state.students.length === 0) {
+    const isRoster = activePage === 'roster';
+    if ((isRoster ? rosterForm.records : state.students).length === 0) {
       window.alert('当前没有可导出的学生数据，请先解决花名册读取问题。');
       return;
     }
@@ -408,7 +531,9 @@
     if (missingMakeup > 0) {
       summary += `其中 ${missingMakeup} 名只填了理由、未选是否补假（可不选），导出时该字段留空。`;
     }
-    els.modalSummary.textContent = summary;
+    els.modalSummary.textContent = isRoster
+      ? `导出全部 ${rosterForm.records.length} 名学生。未填写的字段留空。CSV 保存到：${state.exportDir || '项目根目录'}。`
+      : summary;
     setStatus('', '');
     els.revealBtn.hidden = true;
     els.modalBackdrop.hidden = false;
@@ -436,7 +561,7 @@
     setBusy(true);
     setStatus('正在复制……', '');
     try {
-      const data = await api('/api/clipboard', { method: 'POST', body: { records: payloadRecords() } });
+      const data = await api('/api/clipboard', { method: 'POST', body: exportPayload() });
       setStatus(`${data.message}。可以直接粘贴到聊天窗口或表格软件。`, 'success');
     } catch (err) {
       setStatus(`复制失败：${err.message}`, 'error');
@@ -450,7 +575,7 @@
     setBusy(true);
     setStatus('正在复制并写出 CSV……', '');
     try {
-      const data = await api('/api/export', { method: 'POST', body: { records: payloadRecords() } });
+      const data = await api('/api/export', { method: 'POST', body: exportPayload() });
       state.lastCsvPath = data.csv ? data.csv.path : null;
       const kind = data.clipboardWarning ? 'error' : 'success';
       setStatus(data.message, kind);
