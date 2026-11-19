@@ -31,6 +31,9 @@
           </div>
         </div>
         <button type="button" class="btn" id="importBtn">读取 CSV</button>
+        <button type="button" class="icon-btn" data-open-settings aria-label="设置" title="设置" aria-haspopup="dialog">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M8.4 3h3.2l.4 1.8 1.3.7 1.8-.5 1.6 2.8-1.3 1.3v1.8l1.3 1.3-1.6 2.8-1.8-.5-1.3.7-.4 1.8H8.4L8 15.2l-1.3-.7-1.8.5-1.6-2.8 1.3-1.3V9.1L3.3 7.8 4.9 5l1.8.5L8 4.8Z"/><circle cx="10" cy="10" r="2.4"/></svg>
+        </button>
         <button type="button" class="btn primary" id="exportBtn">导出</button>
       </div>
     </header>
@@ -49,6 +52,10 @@
             <path d="M4 5.75h12M4 10h12M4 14.25h7.5" />
           </svg>
           <span class="nav-label">花名册</span>
+        </button>
+        <button type="button" class="btn drawer-settings" data-open-settings aria-label="设置" aria-haspopup="dialog">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M8.4 3h3.2l.4 1.8 1.3.7 1.8-.5 1.6 2.8-1.3 1.3v1.8l1.3 1.3-1.6 2.8-1.8-.5-1.3.7-.4 1.8H8.4L8 15.2l-1.3-.7-1.8.5-1.6-2.8 1.3-1.3V9.1L3.3 7.8 4.9 5l1.8.5L8 4.8Z"/><circle cx="10" cy="10" r="2.4"/></svg>
+          <span class="nav-label">设置</span>
         </button>
       </nav>
 
@@ -85,6 +92,46 @@
         </footer>
       </div>
     </div>
+
+    <dialog class="modal settings-dialog" id="settingsDialog" aria-labelledby="settingsTitle">
+      <form method="dialog" class="modal-head">
+        <h2 id="settingsTitle">设置</h2>
+        <button class="icon-btn" aria-label="关闭设置">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+            <path d="M6 6l8 8M14 6l-8 8" />
+          </svg>
+        </button>
+      </form>
+      <div class="settings-options">
+        <label class="settings-row">
+          外观
+          <select id="themeSetting" autofocus>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </label>
+        <label class="settings-row">
+          请假登记卡片大小
+          <select id="cardSizeSetting">
+            <option value="small">小</option>
+            <option value="medium">中</option>
+            <option value="large">大</option>
+          </select>
+        </label>
+        <fieldset>
+          <legend>默认导出范围</legend>
+          <label class="settings-row">
+            请假登记包含未填写的学生
+            <input type="checkbox" id="leaveScopeSetting" />
+          </label>
+          <label class="settings-row">
+            花名册包含未填写的学生
+            <input type="checkbox" id="rosterScopeSetting" />
+          </label>
+        </fieldset>
+      </div>
+      <p id="settingsStatus" class="modal-status" role="status" hidden></p>
+    </dialog>
 
     <div class="modal-backdrop" id="modalBackdrop" hidden>
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">

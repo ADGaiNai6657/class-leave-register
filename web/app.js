@@ -87,6 +87,64 @@
   const includeUnfilled = document.getElementById('includeUnfilled');
   const menuBtn = document.getElementById('menuBtn');
   const pageDrawer = document.getElementById('pageDrawer');
+  const settingsDialog = document.getElementById('settingsDialog');
+  const themeSetting = document.getElementById('themeSetting');
+  const cardSizeSetting = document.getElementById('cardSizeSetting');
+  const leaveScopeSetting = document.getElementById('leaveScopeSetting');
+  const rosterScopeSetting = document.getElementById('rosterScopeSetting');
+  const settingsStatus = document.getElementById('settingsStatus');
+  const settingsKey = 'class-leave-register.settings';
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  const settings = { theme: null, cardSize: 'medium', leaveScope: false, rosterScope: true };
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(settingsKey));
+    if (saved?.theme === 'light' || saved?.theme === 'dark') settings.theme = saved.theme;
+    if (['small', 'medium', 'large'].includes(saved?.cardSize)) settings.cardSize = saved.cardSize;
+    if (typeof saved?.leaveScope === 'boolean') settings.leaveScope = saved.leaveScope;
+    if (typeof saved?.rosterScope === 'boolean') settings.rosterScope = saved.rosterScope;
+  } catch {
+    // 设置无法读取时使用默认值。
+  }
+
+  function applyTheme() {
+    const theme = settings.theme || (systemTheme.matches ? 'dark' : 'light');
+    document.documentElement.dataset.theme = theme;
+    themeSetting.value = theme;
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(settingsKey, JSON.stringify(settings));
+      settingsStatus.hidden = true;
+    } catch {
+      settingsStatus.textContent = '设置已生效，但浏览器未能保存。';
+      settingsStatus.hidden = false;
+    }
+  }
+
+  applyTheme();
+  systemTheme.addEventListener('change', applyTheme);
+  for (const button of document.querySelectorAll('[data-open-settings]')) {
+    button.addEventListener('click', () => {
+      cardSizeSetting.value = settings.cardSize;
+      leaveScopeSetting.checked = settings.leaveScope;
+      rosterScopeSetting.checked = settings.rosterScope;
+      settingsDialog.showModal();
+    });
+  }
+  settingsDialog.addEventListener('change', (event) => {
+    if (event.target === themeSetting) {
+      settings.theme = themeSetting.value;
+      applyTheme();
+    } else {
+      settings.cardSize = cardSizeSetting.value;
+      settings.leaveScope = leaveScopeSetting.checked;
+      settings.rosterScope = rosterScopeSetting.checked;
+      applyCardSize(settings.cardSize);
+    }
+    saveSettings();
+  });
   const workspace = document.querySelector('.workspace');
   const rosterForm = { headers: { text: '', choice: '' }, records: [] };
   let activePage = 'leave';
@@ -235,7 +293,7 @@
 
   menuBtn.addEventListener('click', () => setDrawer(pageDrawer.hidden));
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !pageDrawer.hidden && els.modalBackdrop.hidden && els.importBackdrop.hidden) {
+    if (event.key === 'Escape' && !settingsDialog.open && !pageDrawer.hidden && els.modalBackdrop.hidden && els.importBackdrop.hidden) {
       setDrawer(false);
       menuBtn.focus();
     }
@@ -600,7 +658,7 @@
       window.alert('当前没有可导出的学生数据，请先解决花名册读取问题。');
       return;
     }
-    includeUnfilled.checked = activePage === 'roster';
+    includeUnfilled.checked = activePage === 'roster' ? settings.rosterScope : settings.leaveScope;
     updateExportSummary();
     setStatus('', '');
     els.revealBtn.hidden = true;
@@ -814,7 +872,9 @@
   els.sizeGroup.addEventListener('click', (event) => {
     const btn = event.target.closest('button[data-size]');
     if (!btn) return;
-    applyCardSize(btn.dataset.size);
+    settings.cardSize = btn.dataset.size;
+    applyCardSize(settings.cardSize);
+    saveSettings();
   });
 
   els.exportBtn.addEventListener('click', openModal);
@@ -886,6 +946,7 @@
   });
 
   document.addEventListener('keydown', (event) => {
+    if (settingsDialog.open) return;
     if (event.key === 'Escape') {
       if (!els.modalBackdrop.hidden) closeModal();
       if (!els.importBackdrop.hidden) closeImport();
@@ -897,12 +958,12 @@
   });
 
   window.addEventListener('DOMContentLoaded', () => {
-    applyCardSize('medium');
+    applyCardSize(settings.cardSize);
     loadState();
   });
 
   if (document.readyState !== 'loading') {
-    applyCardSize('medium');
+    applyCardSize(settings.cardSize);
     loadState();
   }
 })();
