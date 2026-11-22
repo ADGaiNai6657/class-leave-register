@@ -10,6 +10,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 
 const { resolveRoster, RosterError, defaultSearchDirs } = require('./lib/roster');
 const {
@@ -176,7 +177,22 @@ function createServer(context) {
     error: null,
     errorDetails: null,
     loadedAt: null,
+    rosterVersion: null,
+    recordsRevision: 0,
+    records: { leave: [], roster: [] },
   };
+
+  const stateSnapshot = () => ({
+    roster: state.roster,
+    error: state.error,
+    errorDetails: state.errorDetails,
+    loadedAt: state.loadedAt,
+    rosterVersion: state.rosterVersion,
+    recordsRevision: state.recordsRevision,
+    records: state.records,
+    exportDir: exportDir || defaultExportDir(),
+    exportTitle: resolveCurrentTitle().title,
+  });
 
   /** 每次导出时按“当前花名册”解析标题，重新扫描 / 切换花名册后自动跟着变 */
   const resolveCurrentTitle = () =>
@@ -187,9 +203,15 @@ function createServer(context) {
     );
 
   const loadRoster = (rosterPath) => {
+    state.rosterVersion = randomUUID();
+    state.recordsRevision += 1;
+    state.records = { leave: [], roster: [] };
     try {
       const roster = resolveRoster({ appDir, rosterPath: rosterPath || context.rosterPath });
       state.roster = roster;
+      for (const page of ['leave', 'roster']) {
+        state.records[page] = roster.students.map(({ name }, index) => ({ index, name, reason: '', makeup: null }));
+      }
       state.error = null;
       state.errorDetails = null;
       state.loadedAt = new Date().toISOString();
@@ -246,6 +268,7 @@ function createServer(context) {
     return sendJson(res, 200, {
       ok: true,
       canceled: false,
+      rosterVersion: state.rosterVersion,
       fileName,
       sourcePath,
       encoding: parsed.encoding,
@@ -272,16 +295,58 @@ function createServer(context) {
       const url = new URL(req.url, `http://${host}`);
       const pathname = decodeURIComponent(url.pathname);
 
-      if (pathname === '/api/ai/v1/openapi.json' || pathname === '/api/ai/v1/roster') {
-        if (req.method !== 'GET') {
-          res.setHeader('Allow', 'GET');
-          return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 请求' });
+      const recordsRoute = /^\/api\/ai\/v1\/records\/(leave|roster)$/.exec(pathname);
+      if (recordsRoute || pathname === '/api/ai/v1/openapi.json' || pathname === '/api/ai/v1/roster') {
+        if (req.method !== 'GET' && !(recordsRoute && req.method === 'PATCH')) {
+          res.setHeader('Allow', recordsRoute ? 'GET, PATCH' : 'GET');
+          return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED', message: '此接口不支持该请求方法' });
         }
         if (pathname === '/api/ai/v1/openapi.json') {
           return sendJson(res, 200, aiOpenApi);
         }
         if (!state.roster) {
           return sendJson(res, 409, { code: 'ROSTER_UNAVAILABLE', message: '请先在班级请假登记中加载花名册' });
+        }
+        if (recordsRoute) {
+          const page = recordsRoute[1];
+          if (req.method === 'PATCH') {
+            if (req.headers.origin && req.headers.origin !== `http://${host}`) {
+              return sendJson(res, 403, { code: 'ORIGIN_FORBIDDEN', message: '只允许本机页面写入记录' });
+            }
+            if (String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase() !== 'application/json') {
+              return sendJson(res, 415, { code: 'JSON_REQUIRED', message: '写入请求必须使用 JSON' });
+            }
+            let body;
+            try {
+              body = parseJsonBody(await readBody(req));
+            } catch {
+              return sendJson(res, 400, { code: 'INVALID_UPDATE', message: '无法读取 JSON 更新内容' });
+            }
+            if (typeof body?.rosterVersion !== 'string' || !Array.isArray(body.updates) || body.updates.length === 0) {
+              return sendJson(res, 400, { code: 'INVALID_UPDATE', message: '请提供 rosterVersion 和非空 updates' });
+            }
+            if (body.rosterVersion !== state.rosterVersion) {
+              return sendJson(res, 409, { code: 'ROSTER_CHANGED', message: '花名册已变化，请重新读取记录' });
+            }
+            const records = state.records[page];
+            const indexes = new Set();
+            for (const update of body.updates) {
+              if (!update || !Number.isInteger(update.index) || !records[update.index] || indexes.has(update.index)
+                || (!Object.hasOwn(update, 'reason') && !Object.hasOwn(update, 'makeup'))
+                || Object.keys(update).some((key) => !['index', 'reason', 'makeup'].includes(key))
+                || (Object.hasOwn(update, 'reason') && typeof update.reason !== 'string')
+                || (Object.hasOwn(update, 'makeup') && ![true, false, null].includes(update.makeup))) {
+                return sendJson(res, 400, { code: 'INVALID_UPDATE', message: '请提供有效且不重复的学生索引及填写字段' });
+              }
+              indexes.add(update.index);
+            }
+            for (const update of body.updates) Object.assign(records[update.index], update);
+            state.recordsRevision += 1;
+          }
+          return sendJson(res, 200, {
+            rosterVersion: state.rosterVersion,
+            records: state.records[page],
+          });
         }
         return sendJson(res, 200, {
           displayName: state.roster.displayName,
@@ -312,15 +377,7 @@ function createServer(context) {
       }
 
       if (req.method === 'GET' && pathname === '/api/state') {
-        return sendJson(res, 200, {
-          ok: true,
-          roster: state.roster,
-          error: state.error,
-          errorDetails: state.errorDetails,
-          loadedAt: state.loadedAt,
-          exportDir: exportDir || defaultExportDir(),
-          exportTitle: resolveCurrentTitle().title,
-        });
+        return sendJson(res, 200, { ok: true, ...stateSnapshot() });
       }
 
       if (req.method === 'POST' && pathname === '/api/reload') {
@@ -333,14 +390,7 @@ function createServer(context) {
         } else {
           loadRoster(null);
         }
-        return sendJson(res, 200, {
-          ok: !state.error,
-          roster: state.roster,
-          error: state.error,
-          errorDetails: state.errorDetails,
-          exportDir: exportDir || defaultExportDir(),
-          exportTitle: resolveCurrentTitle().title,
-        });
+        return sendJson(res, 200, { ok: !state.error, ...stateSnapshot() });
       }
 
       if (req.method === 'POST' && (pathname === '/api/clipboard' || pathname === '/api/export')) {

@@ -71,14 +71,28 @@ node server.js --help                        # 查看帮助
 
 ### 本机 AI API
 
-用 `node server.js --port 8080 --no-open` 启动服务后，本机的 AI 工具或脚本可以通过 HTTP 调用以下只读接口。使用其他端口时，将示例中的 `8080` 换成启动时显示的端口。
+用 `node server.js --port 8080 --no-open` 启动服务后，本机的 AI 工具或脚本可以通过 HTTP 分别读写「请假登记」和「花名册」页面的填写内容。使用其他端口时，将示例中的 `8080` 换成启动时显示的端口。
 
 ```bash
 curl http://127.0.0.1:8080/api/ai/v1/openapi.json
 curl http://127.0.0.1:8080/api/ai/v1/roster
+curl http://127.0.0.1:8080/api/ai/v1/records/leave
+curl http://127.0.0.1:8080/api/ai/v1/records/roster
 ```
 
-第一条返回 OpenAPI 3.1 描述。第二条返回当前花名册的 `displayName` 和 `students`（按名单顺序排列，每项仅含 `name`）。当前没有可用花名册时，返回 HTTP 409，错误码为 `ROSTER_UNAVAILABLE`。网页里正在填写的请假记录保存在浏览器内存中，不在此接口的访问范围内。
+`openapi.json` 返回 OpenAPI 3.1 描述。`roster` 返回花名册名称和学生姓名。两个 `records` 地址分别返回对应页面的 `rosterVersion` 和 `records`。按返回的 `index` 定位学生，同名学生各有自己的索引。
+
+将以下示例的版本号和索引替换为读取结果中的值，即可更新「请假登记」页；将地址末尾改为 `roster` 可更新「花名册」页。
+
+```bash
+curl -X PATCH http://127.0.0.1:8080/api/ai/v1/records/leave \
+  -H 'Content-Type: application/json' \
+  --data '{"rosterVersion":"替换为实际版本","updates":[{"index":0,"reason":"就医","makeup":false}]}'
+```
+
+一次请求可更新多名学生。只修改提交的字段，`reason: ""` 清空理由，`makeup: null` 清除补假选择。没有可用花名册时返回 HTTP 409（`ROSTER_UNAVAILABLE`），花名册重新加载后旧版本写入返回 HTTP 409（`ROSTER_CHANGED`），需要重新读取记录。两个页面的填写内容独立，网页约每秒同步一次。网页和 AI 更新同一字段时，以服务最后收到的有效更新为准。
+
+记录只保存在本机服务内存。刷新网页会恢复当前记录，停止服务或重新加载花名册会清空记录。花名册源文件保持只读。
 
 ---
 
@@ -375,7 +389,7 @@ macOS 用 `pbpaste`、Windows 用 `Get-Clipboard`）、
    不支持宏、图表、合并单元格语义、公式计算（只读取单元格里已存的值）；
    若某个 `.xls` 结构特殊导致读取失败，请用 Excel / WPS / Numbers 另存为 `.xlsx` 或 `.csv` 后重试。
 4. `.xlsx` 不支持 ZIP64（超大工作簿），同样建议另存为 `.csv`。
-5. 填写内容不做持久化（按需求刻意如此），关闭窗口即丢失；也没有「撤销 / 重做」。
+5. 填写内容保存在本机服务内存，停止服务即丢失。当前没有「撤销 / 重做」。
 6. 卡片大小与窗口状态不记忆，每次启动都是「中」号。
 7. 同一文件夹里同时放了多个花名册文件时，每次启动都需要手动点选一次（不会记忆选择）。
 8. 应用用系统默认浏览器打开界面（就是浏览器里的一个标签页）；如需「应用窗口」外观，可改装 Electron。

@@ -650,11 +650,37 @@ async function main() {
       .map((e) => JSON.stringify(e.params).slice(0, 300));
     equal('页面无 JavaScript 报错', pageErrors, []);
 
-    // ---------------------------------------------------------- 刷新后数据不保留（符合“不做持久化”）
+    // ---------------------------------------------------------- AI API 与网页双向同步
+    const recordsUrl = (page) => `${baseUrl}api/ai/v1/records/${page}`;
+    await cdp.waitFor(`fetch('${recordsUrl('leave')}').then((r) => r.json()).then((data) => data.records.some((item) => item.reason))`);
+    const leaveRecords = await fetchJson(recordsUrl('leave'));
+    const updateRecords = (page, updates, rosterVersion = leaveRecords.rosterVersion) => fetch(recordsUrl(page), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rosterVersion, updates }),
+    });
+    equal('旧花名册版本不能写入', (await updateRecords('leave', [{ index: 0, reason: '旧版本' }], 'stale')).status, 409);
+    equal('无效批量更新不生效', (await updateRecords('leave', [{ index: 0, reason: '无效更新' }, { index: total, makeup: true }])).status, 400);
+    equal('无效批量更新保持原记录', await fetchJson(recordsUrl('leave')), leaveRecords);
+    equal('AI 写入请假登记', (await updateRecords('leave', [{ index: 0, reason: 'AI 请假理由', makeup: false }])).status, 200);
+    equal('AI 写入花名册', (await updateRecords('roster', [{ index: 0, reason: 'AI 花名册理由', makeup: true }])).status, 200);
+    await cdp.waitFor(`document.querySelector('.card[data-index="0"] textarea').value === 'AI 请假理由'
+      && document.querySelector('.card[data-index="0"] input[value="no"]').checked
+      && document.querySelector('.roster-input').value === 'AI 花名册理由'
+      && document.querySelector('.roster-record .choice-btn').getAttribute('aria-pressed') === 'true'`);
+    check('网页自动同步两个页面的独立记录', true);
+
     await cdp.send('Page.reload');
     await cdp.waitFor("document.querySelectorAll('.card').length > 0", 15000, '刷新后重新渲染');
+    equal('刷新网页会恢复本机服务中的记录', await cdp.eval(
+      `return document.querySelector('.card[data-index="0"] textarea').value;`
+    ), 'AI 请假理由');
+    const clear = leaveRecords.records.map(({ index }) => ({ index, reason: '', makeup: null }));
+    equal('AI 清空请假登记填写字段', (await updateRecords('leave', clear)).status, 200);
+    equal('AI 清空花名册填写字段', (await updateRecords('roster', clear)).status, 200);
+    await cdp.waitFor("document.querySelectorAll('.card.edited').length === 0");
     equal(
-      '刷新后回到初始状态（填写内容不持久化）',
+      '网页自动显示清空后的记录',
       await cdp.eval(`return { edited: document.querySelectorAll('.card.edited').length, stat: document.getElementById('statLine').textContent, count: document.querySelectorAll('.card').length };`),
       { edited: 0, stat: `已填写 0 / ${total}`, count: total }
     );
@@ -962,11 +988,11 @@ async function main() {
     };`), { names: expectedNames.filter((name) => name.startsWith(expectedNames[0])), text: '切换列数后保留', emptyLists: false });
     await cdp.send('Page.reload');
     await cdp.waitFor("document.querySelectorAll('.roster-record').length > 0");
-    equal('刷新保留启动页面和列数但不保留填写内容', await cdp.eval(`return {
+    equal('刷新保留启动页面、列数和当前服务内的填写内容', await cdp.eval(`return {
       roster: !document.getElementById('rosterGrid').hidden,
       lists: document.querySelectorAll('.roster-list').length,
       reason: document.querySelector('.roster-input').value,
-    };`), { roster: true, lists: 4, reason: '' });
+    };`), { roster: true, lists: 4, reason: '切换列数后保留' });
     await chooseSetting('startPageSetting', 'leave');
     await cdp.send('Page.reload');
     await cdp.waitFor("document.querySelectorAll('.card').length > 0");

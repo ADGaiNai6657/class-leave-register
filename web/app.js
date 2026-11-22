@@ -6,7 +6,7 @@
  * 设计要点：
  *  - 数据（state.students）与界面分离：DOM 只用来展示，填写内容都保存在数据模型里；
  *  - 所有来自花名册的文字都用 textContent 写入，避免任何 HTML 注入；
- *  - 不做任何持久化：关闭窗口后本次填写的内容全部丢失（符合需求）。
+ *  - 填写内容由本机服务共享，关闭服务后丢失。
  */
 
 (function () {
@@ -65,7 +65,7 @@
         throw new Error(`服务返回了无法解析的内容（HTTP ${res.status}）`);
       }
       if (!res.ok || data.ok === false) {
-        throw new Error(data && data.error ? data.error : `请求失败（HTTP ${res.status}）`);
+        throw new Error(data?.error || data?.message || `请求失败（HTTP ${res.status}）`);
       }
       return data;
     });
@@ -185,6 +185,35 @@
   const workspace = document.querySelector('.workspace');
   const rosterForm = { headers: { text: '', choice: '' }, records: [] };
   let activePage = 'leave';
+  let rosterVersion;
+  let recordsRevision = -1;
+  let writeQueue = Promise.resolve();
+  let pendingWrites = 0;
+  let writeSequence = 0;
+  let syncError = '';
+  let loadingRoster = false;
+  let composing = false;
+
+  workspace.addEventListener('compositionstart', () => { composing = true; });
+  workspace.addEventListener('compositionend', () => { composing = false; });
+
+  function saveRecords(page, updates) {
+    const body = { rosterVersion, updates };
+    writeSequence += 1;
+    pendingWrites += 1;
+    const request = writeQueue.then(() => api(`/api/ai/v1/records/${page}`, { method: 'PATCH', body }));
+    writeQueue = request.then(() => {
+      if (syncError) {
+        syncError = '';
+        renderBanners();
+      }
+    }, (error) => {
+      syncError = `记录同步失败：${error.message}`;
+      recordsRevision = -1;
+      renderBanners();
+    }).finally(() => { pendingWrites -= 1; });
+    return request;
+  }
 
   function matchesSearch(name) {
     return window.nameSearch.matches(name, nameSearchInput.value);
@@ -302,6 +331,7 @@
       button.setAttribute('aria-pressed', String(record.makeup === value));
       button.addEventListener('click', () => {
         record.makeup = record.makeup === value ? null : value;
+        saveRecords('roster', [{ index: Number(row.dataset.index), makeup: record.makeup }]);
         syncRosterRecord(row, record, choiceButtons);
         updateRosterSummary();
       });
@@ -311,6 +341,7 @@
 
     input.addEventListener('input', () => {
       record.reason = input.value;
+      saveRecords('roster', [{ index: Number(row.dataset.index), reason: record.reason }]);
       syncRosterRecord(row, record, choiceButtons);
       updateRosterSummary();
     });
@@ -461,6 +492,14 @@
   function renderBanners() {
     els.bannerArea.replaceChildren();
 
+    if (syncError) {
+      const banner = document.createElement('div');
+      banner.className = 'banner error';
+      banner.setAttribute('role', 'alert');
+      banner.textContent = syncError;
+      els.bannerArea.append(banner);
+    }
+
     if (state.error) {
       const banner = document.createElement('div');
       banner.className = 'banner error';
@@ -575,6 +614,7 @@
     clearMakeup.hidden = student.makeup === null;
     clearMakeup.addEventListener('click', () => {
       state.students[index].makeup = null;
+      saveRecords('leave', [{ index, makeup: null }]);
       for (const radio of makeupGroup.querySelectorAll('input[type="radio"]')) radio.checked = false;
       clearMakeup.hidden = true;
       updateCardVisual(index);
@@ -594,6 +634,7 @@
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         state.students[index].makeup = value === 'yes';
+        saveRecords('leave', [{ index, makeup: state.students[index].makeup }]);
         clearMakeup.hidden = false;
         updateCardVisual(index);
       });
@@ -614,6 +655,7 @@
 
     textarea.addEventListener('input', () => {
       state.students[index].reason = textarea.value;
+      saveRecords('leave', [{ index, reason: textarea.value }]);
       updateCardVisual(index);
     });
 
@@ -720,6 +762,7 @@
   }
 
   function applyState(data) {
+    rosterVersion = data.rosterVersion;
     state.error = data.error || null;
     state.errorDetails = data.errorDetails || null;
     state.exportDir = data.exportDir || '';
@@ -728,12 +771,66 @@
     renderRosterInfo();
     renderBanners();
     renderGrid();
+    applyRecordSnapshot(data);
+  }
+
+  function applyRecordSnapshot(data) {
+    recordsRevision = data.recordsRevision;
+    for (const [page, records] of [['leave', state.students], ['roster', rosterForm.records]]) {
+      for (const { index, reason, makeup } of data.records[page]) {
+        Object.assign(records[index], { reason, makeup, edited: reason.trim() !== '' || makeup !== null });
+      }
+    }
+    for (const card of els.grid.querySelectorAll('.card')) {
+      const index = Number(card.dataset.index);
+      const { reason, makeup } = state.students[index];
+      const textarea = card.querySelector('textarea');
+      if (textarea.value !== reason) textarea.value = reason;
+      for (const radio of card.querySelectorAll('input[type="radio"]')) radio.checked = makeup === (radio.value === 'yes');
+      card.querySelector('.clear-makeup-btn').hidden = makeup === null;
+      updateCardVisualFor(card, index);
+    }
+    for (const row of document.querySelectorAll('.roster-record')) {
+      const record = rosterForm.records[Number(row.dataset.index)];
+      const input = row.querySelector('.roster-input');
+      if (input.value !== record.reason) input.value = record.reason;
+      const [yes, no] = row.querySelectorAll('.choice-btn');
+      syncRosterRecord(row, record, [[true, yes], [false, no]]);
+    }
+    updateStatLine();
+    updateRosterSummary();
+    if (!els.modalBackdrop.hidden) updateExportSummary();
+  }
+
+  async function syncRecords() {
+    if (loadingRoster || pendingWrites || composing) return;
+    const sequence = writeSequence;
+    const version = rosterVersion;
+    try {
+      const data = await api('/api/state');
+      if (loadingRoster || pendingWrites || composing || sequence !== writeSequence || version !== rosterVersion) return;
+      if (data.rosterVersion !== rosterVersion) applyState(data);
+      else if (data.recordsRevision !== recordsRevision) applyRecordSnapshot(data);
+    } catch (error) {
+      if (!syncError && !loadingRoster && sequence === writeSequence && version === rosterVersion) {
+        syncError = `无法同步记录：${error.message}`;
+        renderBanners();
+      }
+      return;
+    }
+    if (syncError) {
+      syncError = '';
+      renderBanners();
+    }
   }
 
   async function reload(path) {
-    if (editedCount() > 0 && !window.confirm('重新读取花名册会清空当前已填写的内容，确定继续吗？')) return;
+    if (loadingRoster) return;
+    if ((editedCount() > 0 || rosterFilledCount() > 0) && !window.confirm('重新读取花名册会清空当前已填写的内容，确定继续吗？')) return;
     const body = path ? { path } : {};
+    loadingRoster = true;
     try {
+      await writeQueue;
       const data = await api('/api/reload', { method: 'POST', body });
       applyState(data);
     } catch (err) {
@@ -741,6 +838,8 @@
       state.errorDetails = state.errorDetails || null;
       renderRosterInfo();
       renderBanners();
+    } finally {
+      loadingRoster = false;
     }
   }
 
@@ -889,9 +988,13 @@
   }
 
   /** 把服务端返回的匹配结果应用到卡片上（先清空，再按 CSV 恢复） */
-  function applyImportReport(data) {
+  async function applyImportReport(data) {
     if (!data || !Array.isArray(data.matched)) {
       setImportStatus('服务返回的数据无法识别。', 'error');
+      return;
+    }
+    if (data.rosterVersion !== rosterVersion) {
+      setImportStatus('花名册已变化，请重新读取 CSV。', 'error');
       return;
     }
     if (data.matched.length === 0) {
@@ -929,6 +1032,7 @@
     }
 
     renderGrid();
+    await saveRecords('leave', state.students.map(({ reason, makeup }, index) => ({ index, reason, makeup })));
 
     const parts = [`已从「${data.fileName || 'CSV'}」恢复 ${applied} 条请假记录。`];
     if (data.unmatched && data.unmatched.length > 0) {
@@ -953,7 +1057,7 @@
         method: 'POST',
         body: { fileName: file.name, contentBase64: toBase64(buffer) },
       });
-      applyImportReport(data);
+      await applyImportReport(data);
     } catch (err) {
       setImportStatus(`读取失败：${err.message}`, 'error');
     } finally {
@@ -972,7 +1076,7 @@
       if (data.canceled) {
         setImportStatus('已取消。', '');
       } else {
-        applyImportReport(data);
+        await applyImportReport(data);
       }
     } catch (err) {
       fallback = true;
@@ -1094,7 +1198,12 @@
     applyTheme();
     applyCardSize(settings.cardSize);
     selectPage(settings.startPage);
-    loadState();
+    await loadState();
+    async function pollRecords() {
+      await syncRecords();
+      window.setTimeout(pollRecords, 1000);
+    }
+    window.setTimeout(pollRecords, 1000);
   }
 
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });

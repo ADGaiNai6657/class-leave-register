@@ -3,7 +3,7 @@
   "info": {
     "title": "班级请假登记 AI API",
     "version": "1.0.0",
-    "description": "供本机工具读取已加载的花名册。"
+    "description": "供本机工具读取花名册以及分别读写请假登记与花名册页面的填写记录。"
   },
   "servers": [{ "url": "/" }],
   "paths": {
@@ -49,6 +49,153 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/ai/v1/records/{page}": {
+      "parameters": [
+        {
+          "name": "page",
+          "in": "path",
+          "required": true,
+          "description": "leave 为请假登记，roster 为花名册",
+          "schema": {"type": "string", "enum": ["leave", "roster"]}
+        }
+      ],
+      "get": {
+        "operationId": "getPageRecords",
+        "summary": "读取指定页面的填写记录",
+        "responses": {
+          "200": {
+            "description": "当前记录与花名册版本",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/RecordSnapshot"}
+              }
+            }
+          },
+          "409": {
+            "description": "尚未加载花名册",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePageRecords",
+        "summary": "批量更新指定页面的填写记录",
+        "description": "使用读取时返回的名单版本和学生索引。未提供的字段保留原值，空字符串或 null 可清除对应字段。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/RecordUpdateBatch"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的记录",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/RecordSnapshot"}
+              }
+            }
+          },
+          "400": {
+            "description": "无效的批量更新",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "403": {
+            "description": "请求来自其他网页来源",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "409": {
+            "description": "花名册不可用或已变更",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          },
+          "415": {
+            "description": "请求体必须使用 JSON",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/Error"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Record": {
+        "type": "object",
+        "required": ["index", "name", "reason", "makeup"],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string"},
+          "makeup": {"type": ["boolean", "null"]},
+          "name": {"type": "string"}
+        }
+      },
+      "RecordSnapshot": {
+        "type": "object",
+        "required": ["rosterVersion", "records"],
+        "properties": {
+          "rosterVersion": {"type": "string"},
+          "records": {
+            "type": "array",
+            "items": {"$ref": "#/components/schemas/Record"}
+          }
+        }
+      },
+      "RecordUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index"],
+        "anyOf": [
+          {"required": ["reason"]},
+          {"required": ["makeup"]}
+        ],
+        "properties": {
+          "index": {"type": "integer", "minimum": 0},
+          "reason": {"type": "string"},
+          "makeup": {"type": ["boolean", "null"]}
+        }
+      },
+      "RecordUpdateBatch": {
+        "type": "object",
+        "required": ["rosterVersion", "updates"],
+        "properties": {
+          "rosterVersion": {"type": "string"},
+          "updates": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/components/schemas/RecordUpdate"}
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string"},
+          "message": {"type": "string"}
         }
       }
     }
