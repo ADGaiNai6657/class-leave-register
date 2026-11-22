@@ -19,6 +19,34 @@ const { decodeText, parseDelimited, sniffDelimiter, readDelimited, readJson } = 
 const { isNameLike, loadRoster, resolveRoster, RosterError, discoverRosterFiles, defaultSearchDirs, rosterDisplayName } = require('../lib/roster');
 const { parseLeaveCsv, matchRecords } = require('../lib/import');
 const { matches: matchesName } = require('../web/name-search');
+const { DEFAULT_SETTINGS, normalizeSettings, readSettings, writeSettings } = require('../lib/settings');
+
+test('设置持久化：重新读取恢复全部偏好，且不写入学生信息', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'class-leave-settings-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'user-settings.json');
+  assert.equal(readSettings(file), null);
+  const expected = { theme: 'dark', cardSize: 'large', startPage: 'roster', rosterColumnCount: 4, leaveScope: true, rosterScope: false };
+  writeSettings(file, { ...expected, students: [{ name: '不应保存' }], reason: '不应保存' });
+  assert.deepEqual(readSettings(file), expected);
+  assert.equal(fs.readFileSync(file, 'utf8').includes('不应保存'), false);
+  assert.deepEqual(fs.readdirSync(dir), ['user-settings.json']);
+  writeSettings(file, { ...expected, rosterColumnCount: 1 });
+  assert.equal(readSettings(file).rosterColumnCount, 1);
+});
+
+test('设置持久化：无效值回退，损坏或无法写入的文件明确报错', (t) => {
+  assert.deepEqual(normalizeSettings({ startPage: 'invalid', rosterColumnCount: 9, theme: 'invalid', leaveScope: 'true' }), DEFAULT_SETTINGS);
+  assert.throws(() => normalizeSettings([]), /对象/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'class-leave-settings-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'settings.json');
+  fs.writeFileSync(file, '{bad json');
+  assert.throws(() => readSettings(file));
+  const blocked = path.join(dir, 'blocked');
+  fs.writeFileSync(blocked, 'file');
+  assert.throws(() => writeSettings(path.join(blocked, 'settings.json'), DEFAULT_SETTINGS));
+});
 
 test('姓名搜索：全名、姓名开头汉字、首字母和大小写', () => {
   for (const query of ['张三', '张', 'zs', 'z', 'ZS', ' ＺＳ ']) {
@@ -420,6 +448,7 @@ test('存在多个花名册时要求用户明确选择', () => {
 test('忽略无关文件（package.json、.DS_Store、本应用导出的 CSV 等）', () => {
   const dir = freshTmp('discover-ignore');
   fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+  fs.writeFileSync(path.join(dir, 'user-settings.json'), JSON.stringify(DEFAULT_SETTINGS));
   fs.writeFileSync(path.join(dir, '.DS_Store'), 'junk');
   fs.writeFileSync(
     path.join(dir, '请假登记-20240101-120000.csv'),

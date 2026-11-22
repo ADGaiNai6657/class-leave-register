@@ -67,6 +67,9 @@ test/screenshots/
 # 格式见 local-config.example.json。
 /local-config.json
 
+# 界面偏好及原子写入的临时文件，不纳入版本库。
+/user-settings.json*
+
 # ---------------------------------------------------------------- 编辑器 / IDE
 .idea/
 .vscode/

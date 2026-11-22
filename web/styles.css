@@ -672,6 +672,7 @@ select {
 }
 
 .roster-list {
+  container: roster-list / inline-size;
   min-width: 0;
   background: var(--surface);
   border-radius: var(--radius-lg);
@@ -1449,19 +1450,19 @@ select {
 
 /* ---------------------------------------------------------------- 响应式 */
 
-@container (width < 1800px) {
+@container (width < 1240px) {
   .roster-columns {
     --roster-column-limit: 3;
   }
 }
 
-@container (width < 1350px) {
+@container (width < 900px) {
   .roster-columns {
     --roster-column-limit: 2;
   }
 }
 
-@container (width < 900px) {
+@container (width < 620px) {
   .roster-columns {
     --roster-column-limit: 1;
   }
@@ -1501,6 +1502,13 @@ select {
     flex: 1;
   }
 
+  .statusbar {
+    padding: 8px 14px;
+  }
+}
+
+/* 列数较多时按每一列的实际宽度使用既有紧凑行布局。 */
+@container roster-list (width < 450px) {
   .roster-list-head {
     display: none;
   }
@@ -1544,9 +1552,6 @@ select {
     font-size: 13px;
   }
 
-  .statusbar {
-    padding: 8px 14px;
-  }
 }
 
 @media (max-width: 720px) {

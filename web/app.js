@@ -56,6 +56,7 @@
       method: (options && options.method) || 'GET',
       headers: { 'Content-Type': 'application/json' },
       body: options && options.body ? JSON.stringify(options.body) : undefined,
+      keepalive: Boolean(options && options.keepalive),
     }).then(async (res) => {
       let data = null;
       try {
@@ -123,14 +124,32 @@
     themeSetting.value = settings.theme;
   }
 
-  function saveSettings() {
+  let settingsSave = Promise.resolve();
+  let settingsRevision = 0;
+  let settingsReady = false;
+
+  function cacheSettings() {
     try {
       localStorage.setItem(settingsKey, JSON.stringify(settings));
-      settingsStatus.hidden = true;
     } catch {
-      settingsStatus.textContent = '设置已生效，但浏览器未能保存。';
-      settingsStatus.hidden = false;
+      // 本地文件为持久化来源，浏览器缓存不可用时仍可正常保存。
     }
+  }
+
+  function saveSettings() {
+    cacheSettings();
+    const snapshot = { ...settings };
+    const revision = ++settingsRevision;
+    settingsSave = settingsSave.catch(() => {}).then(() =>
+      api('/api/settings', { method: 'POST', body: snapshot, keepalive: true })
+    ).then(() => {
+      if (revision === settingsRevision) settingsStatus.hidden = true;
+    }).catch((error) => {
+      if (revision !== settingsRevision) return;
+      settingsStatus.textContent = `设置已生效，但未能保存到本机文件：${error.message}。请重新选择设置以重试。`;
+      settingsStatus.hidden = false;
+    });
+    return settingsSave;
   }
 
   applyTheme();
@@ -146,6 +165,7 @@
     });
   }
   settingsDialog.addEventListener('change', (event) => {
+    if (!settingsReady) return;
     if (event.target === themeSetting) {
       settings.theme = themeSetting.value;
       applyTheme();
@@ -411,8 +431,6 @@
       else item.removeAttribute('aria-current');
     }
   }
-
-  selectPage(settings.startPage);
 
   function exportRecords() {
     return activePage === 'roster' ? rosterForm.records : state.students;
@@ -1055,13 +1073,30 @@
     }
   });
 
-  window.addEventListener('DOMContentLoaded', () => {
+  async function initialize() {
+    const controls = [...settingsDialog.querySelectorAll('select, input'), ...els.sizeGroup.querySelectorAll('button')];
+    for (const control of controls) control.disabled = true;
+    try {
+      const data = await api('/api/settings');
+      if (data.settings) {
+        Object.assign(settings, data.settings);
+        cacheSettings();
+      } else if (localStorage.getItem(settingsKey)) {
+        // 迁移当前端口下旧版浏览器设置；文件存在时始终以文件为准。
+        await saveSettings();
+      }
+    } catch (error) {
+      settingsStatus.textContent = `无法读取本机设置：${error.message}。当前使用浏览器缓存或默认设置。`;
+      settingsStatus.hidden = false;
+    }
+    settingsReady = true;
+    for (const control of controls) control.disabled = false;
+    applyTheme();
     applyCardSize(settings.cardSize);
-    loadState();
-  });
-
-  if (document.readyState !== 'loading') {
-    applyCardSize(settings.cardSize);
+    selectPage(settings.startPage);
     loadState();
   }
+
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', initialize, { once: true });
+  else initialize();
 })();

@@ -25,6 +25,7 @@ const { writeClipboard } = require('./lib/clipboard');
 const { openUrl, revealPath } = require('./lib/system');
 const { parseLeaveCsv, matchRecords } = require('./lib/import');
 const { pickCsvFile } = require('./lib/dialog');
+const { readSettings, writeSettings } = require('./lib/settings');
 
 const APP_DIR = __dirname;
 const WEB_DIR = path.join(APP_DIR, 'web');
@@ -161,6 +162,7 @@ function parseJsonBody(raw) {
 
 function createServer(context) {
   const { appDir, exportDir, title } = context;
+  const settingsFile = context.settingsFile || path.join(appDir, 'user-settings.json');
   const allowedDirs = defaultSearchDirs(appDir).map((d) => path.resolve(d));
 
   const isAllowedRosterPath = (candidate) => {
@@ -268,6 +270,21 @@ function createServer(context) {
 
       const url = new URL(req.url, `http://${host}`);
       const pathname = decodeURIComponent(url.pathname);
+
+      if (pathname === '/api/settings' && req.method === 'GET') {
+        return sendJson(res, 200, { ok: true, settings: readSettings(settingsFile) });
+      }
+      if (pathname === '/api/settings' && req.method === 'POST') {
+        // 只接受当前页面的 JSON 请求，避免其他站点修改本地偏好。
+        if (req.headers.origin && req.headers.origin !== url.origin) {
+          return sendJson(res, 403, { ok: false, error: '只允许当前页面保存设置' });
+        }
+        if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
+          return sendJson(res, 415, { ok: false, error: '设置请求必须使用 JSON' });
+        }
+        const body = parseJsonBody(await readBody(req, 8192));
+        return sendJson(res, 200, { ok: true, settings: writeSettings(settingsFile, body) });
+      }
 
       if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
         return serveStatic(res, 'index.html');
@@ -493,6 +510,7 @@ function main() {
 
   const context = {
     appDir: APP_DIR,
+    settingsFile: process.env.CLASS_LEAVE_SETTINGS_FILE ? path.resolve(process.env.CLASS_LEAVE_SETTINGS_FILE) : undefined,
     rosterPath: options.rosterPath ? path.resolve(options.rosterPath) : null,
     exportDir,
     // 只有显式的 --title 才作为最高优先级；其余标题在导出时按当前花名册动态解析

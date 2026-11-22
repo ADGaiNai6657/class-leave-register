@@ -156,11 +156,11 @@ async function main() {
   let chrome;
   let cdp;
 
-  try {
-    // 1) 启动本地服务
+  async function startServer() {
     server = spawn(process.execPath, ['server.js', '--no-open', '--port', '0', '--export-dir', EXPORT_DIR], {
       cwd: APP_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CLASS_LEAVE_SETTINGS_FILE: path.join(E2E_DIR, 'user-settings.json') },
     });
     let serverLog = '';
     server.stdout.on('data', (d) => {
@@ -170,7 +170,7 @@ async function main() {
       serverLog += d.toString();
     });
 
-    const baseUrl = await (async () => {
+    return (async () => {
       const start = Date.now();
       while (Date.now() - start < 10000) {
         const m = /界面地址：(http:\/\/127\.0\.0\.1:\d+\/)/.exec(serverLog);
@@ -179,6 +179,11 @@ async function main() {
       }
       throw new Error(`服务启动失败：${serverLog}`);
     })();
+  }
+
+  try {
+    // 1) 启动本地服务，测试偏好使用独立文件，不影响用户配置。
+    const baseUrl = await startServer();
     check('本地服务启动成功', true);
     process.stdout.write(`   地址：${baseUrl}\n`);
 
@@ -795,14 +800,17 @@ async function main() {
         { name: 'prefers-reduced-motion', value: motion },
       ],
     });
-    const chooseTheme = (theme) => cdp.eval(`
+    const chooseTheme = async (theme) => {
+      await cdp.eval(`
       document.querySelector('[data-open-settings]').click();
       const select = document.getElementById('themeSetting');
       select.value = ${JSON.stringify(theme)};
       select.dispatchEvent(new Event('change', { bubbles: true }));
       document.getElementById('settingsDialog').close();
       return select.value;
-    `);
+      `);
+      await cdp.waitFor(`fetch('/api/settings').then((r) => r.json()).then((r) => r.settings?.theme === ${JSON.stringify(theme)})`);
+    };
     await chooseTheme('system');
     for (const scheme of ['dark', 'light']) {
       await setMedia(scheme);
@@ -886,14 +894,18 @@ async function main() {
     await cdp.eval(`document.getElementById('settingsDialog').close(); return true;`);
 
     // ---------------------------------------------------------- 启动页面与花名册列数
-    const chooseSetting = (id, value) => cdp.eval(`
+    const chooseSetting = async (id, value) => {
+      await cdp.eval(`
       document.querySelector('[data-open-settings]').click();
       const select = document.getElementById(${JSON.stringify(id)});
       select.value = ${JSON.stringify(String(value))};
       select.dispatchEvent(new Event('change', { bubbles: true }));
       document.getElementById('settingsDialog').close();
       return true;
-    `);
+      `);
+      const key = { startPageSetting: 'startPage', rosterColumnSetting: 'rosterColumnCount' }[id];
+      await cdp.waitFor(`fetch('/api/settings').then((r) => r.json()).then((r) => String(r.settings?.[${JSON.stringify(key)}]) === ${JSON.stringify(String(value))})`);
+    };
     equal('新增设置默认请假登记、2列', await cdp.eval(`
       document.querySelector('[data-open-settings]').click();
       const values = [document.getElementById('startPageSetting').value, document.getElementById('rosterColumnSetting').value];
@@ -911,7 +923,7 @@ async function main() {
       importHidden: document.getElementById('importBtn').hidden,
       sizeHidden: document.getElementById('sizeGroup').parentElement.hidden,
     };`), { roster: true, leave: true, title: '花名册', current: 'roster', importHidden: true, sizeHidden: true });
-    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 2100, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 1000, deviceScaleFactor: 1, mobile: false });
     for (const columns of [1, 2, 3, 4]) {
       await chooseSetting('rosterColumnSetting', columns);
       await cdp.waitFor(`document.getElementById('rosterColumns').dataset.columns === '${columns}'`);
@@ -930,7 +942,7 @@ async function main() {
       input.value = '切换列数后保留'; input.dispatchEvent(new Event('input'));
       input.focus(); input.setSelectionRange(2, 4); return true;
     `);
-    for (const [width, columns] of [[1500, 3], [1000, 2], [600, 1], [320, 1], [2100, 4]]) {
+    for (const [width, columns] of [[1500, 4], [1000, 3], [720, 2], [600, 1], [320, 1], [1366, 4]]) {
       await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: false });
       await cdp.waitFor(`document.getElementById('rosterColumns').dataset.columns === '${columns}'`);
       equal(`${width}px 自动调整列数并保留输入和焦点`, await cdp.eval(`return {
@@ -971,11 +983,29 @@ async function main() {
     `);
     await cdp.send('Page.reload');
     await cdp.waitFor("document.querySelectorAll('.card').length > 0");
-    equal('无效设置安全回退到默认页面与列数', await cdp.eval(`
+    equal('本机设置优先于浏览器的无效缓存', await cdp.eval(`
       document.querySelector('[data-open-settings]').click();
       return [document.getElementById('startPageSetting').value, document.getElementById('rosterColumnSetting').value];
-    `), ['leave', '2']);
+    `), ['leave', '4']);
     await cdp.screenshot(path.join(SHOT_DIR, '08-设置-启动页面与列数.png'));
+    await cdp.eval(`document.getElementById('settingsDialog').close(); return true;`);
+    await chooseSetting('startPageSetting', 'roster');
+    await chooseTheme('dark');
+    const savedPreferences = (await fetchJson(`${baseUrl}api/settings`)).settings;
+    equal('本机设置文件只保存界面偏好', JSON.parse(fs.readFileSync(path.join(E2E_DIR, 'user-settings.json'), 'utf8')), savedPreferences);
+    await new Promise((resolve) => { server.once('exit', resolve); server.kill('SIGTERM'); });
+    const restartedUrl = await startServer();
+    check('重启服务使用不同端口', restartedUrl !== baseUrl, restartedUrl);
+    equal('服务重启后从文件恢复全部设置', (await fetchJson(`${restartedUrl}api/settings`)).settings, savedPreferences);
+    await cdp.send('Page.navigate', { url: restartedUrl });
+    await cdp.waitFor(`location.href.startsWith(${JSON.stringify(restartedUrl)}) && !document.getElementById('rosterGrid')?.hidden && document.querySelectorAll('.roster-record').length > 0`);
+    equal('不同端口打开仍恢复花名册、深色和4列', await cdp.eval(`return {
+      current: document.querySelector('[aria-current="page"]').dataset.page,
+      theme: document.documentElement.dataset.theme,
+      columns: document.getElementById('rosterColumns').dataset.columns,
+      reason: document.querySelector('.roster-input').value,
+    };`), { current: 'roster', theme: 'dark', columns: '4', reason: '' });
+    await cdp.screenshot(path.join(SHOT_DIR, '09-重启后恢复设置.png'));
   } finally {
     if (cdp) {
       try {
