@@ -1,0 +1,56 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "班级请假登记 AI API",
+    "version": "1.0.0",
+    "description": "供本机工具读取已加载的花名册。"
+  },
+  "servers": [{ "url": "/" }],
+  "paths": {
+    "/api/ai/v1/roster": {
+      "get": {
+        "operationId": "getClassRoster",
+        "summary": "读取当前花名册的学生姓名",
+        "responses": {
+          "200": {
+            "description": "按花名册顺序返回学生，同名学生分别保留",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["displayName", "students"],
+                  "properties": {
+                    "displayName": { "type": "string" },
+                    "students": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name"],
+                        "properties": { "name": { "type": "string" } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "当前没有可用的花名册",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["code", "message"],
+                  "properties": {
+                    "code": { "const": "ROSTER_UNAVAILABLE" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

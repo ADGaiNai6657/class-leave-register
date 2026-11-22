@@ -50,6 +50,7 @@ test/screenshots/
 !package-lock.json
 !local-config.example.json
 !tsconfig.json
+!/lib/ai-openapi.json
 
 # 4) 文件名带这些关键词的，无论扩展名是什么，一律排除
 #    （与上面的扩展名规则互为补充：既不漏掉关键词命中的，也不漏掉不含关键词的）

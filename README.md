@@ -69,6 +69,17 @@ node server.js --help                        # 查看帮助
 
 服务只监听 `127.0.0.1`，局域网内其它设备访问不到。
 
+### 本机 AI API
+
+用 `node server.js --port 8080 --no-open` 启动服务后，本机的 AI 工具或脚本可以通过 HTTP 调用以下只读接口。使用其他端口时，将示例中的 `8080` 换成启动时显示的端口。
+
+```bash
+curl http://127.0.0.1:8080/api/ai/v1/openapi.json
+curl http://127.0.0.1:8080/api/ai/v1/roster
+```
+
+第一条返回 OpenAPI 3.1 描述。第二条返回当前花名册的 `displayName` 和 `students`（按名单顺序排列，每项仅含 `name`）。当前没有可用花名册时，返回 HTTP 409，错误码为 `ROSTER_UNAVAILABLE`。网页里正在填写的请假记录保存在浏览器内存中，不在此接口的访问范围内。
+
 ---
 
 ## 二、使用说明

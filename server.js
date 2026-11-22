@@ -26,6 +26,7 @@ const { openUrl, revealPath } = require('./lib/system');
 const { parseLeaveCsv, matchRecords } = require('./lib/import');
 const { pickCsvFile } = require('./lib/dialog');
 const { readSettings, writeSettings } = require('./lib/settings');
+const aiOpenApi = require('./lib/ai-openapi.json');
 
 const APP_DIR = __dirname;
 const WEB_DIR = path.join(APP_DIR, 'web');
@@ -270,6 +271,23 @@ function createServer(context) {
 
       const url = new URL(req.url, `http://${host}`);
       const pathname = decodeURIComponent(url.pathname);
+
+      if (pathname === '/api/ai/v1/openapi.json' || pathname === '/api/ai/v1/roster') {
+        if (req.method !== 'GET') {
+          res.setHeader('Allow', 'GET');
+          return sendJson(res, 405, { code: 'METHOD_NOT_ALLOWED', message: '只支持 GET 请求' });
+        }
+        if (pathname === '/api/ai/v1/openapi.json') {
+          return sendJson(res, 200, aiOpenApi);
+        }
+        if (!state.roster) {
+          return sendJson(res, 409, { code: 'ROSTER_UNAVAILABLE', message: '请先在班级请假登记中加载花名册' });
+        }
+        return sendJson(res, 200, {
+          displayName: state.roster.displayName,
+          students: state.roster.students.map(({ name }) => ({ name })),
+        });
+      }
 
       if (pathname === '/api/settings' && req.method === 'GET') {
         return sendJson(res, 200, { ok: true, settings: readSettings(settingsFile) });
